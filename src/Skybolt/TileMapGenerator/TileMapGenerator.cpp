@@ -14,6 +14,7 @@
 #include <boost/filesystem.hpp>
 
 using namespace skybolt;
+using namespace vis;
 
 struct TileGenerator
 {
@@ -42,8 +43,8 @@ struct TileGenerator
 								  osg::Vec2d(double(x+1) / double(tileDimensions.x()), double(y+1) / double(tileDimensions.y())));
 
 				osg::Vec2d size = tile.bounds.size();
-				pixelBounds.minimum = tile.bounds.minimum + componentWiseMultiply(pixelBounds.minimum, size);
-				pixelBounds.maximum = tile.bounds.minimum + componentWiseMultiply(pixelBounds.maximum, size);
+				pixelBounds.minimum = tile.bounds.minimum + math::componentWiseMultiply(pixelBounds.minimum, size);
+				pixelBounds.maximum = tile.bounds.minimum + math::componentWiseMultiply(pixelBounds.maximum, size);
 
 				bool pixelWritten = false;
 
@@ -54,7 +55,7 @@ struct TileGenerator
 					{// TODO: downsample filter
 						maxSrcResolution = std::max(maxSrcResolution, layerResolutions[i]);
 
-						osg::Vec2d pSrc = componentWiseDivide(pixelBounds.center() - layer.bounds.minimum, layer.bounds.size());
+						osg::Vec2d pSrc = math::componentWiseDivide(pixelBounds.center() - layer.bounds.minimum, layer.bounds.size());
 						osg::Vec4f c;
 						switch (filtering)
 						{

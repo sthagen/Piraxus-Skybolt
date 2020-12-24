@@ -16,7 +16,7 @@
 
 #include <osg/Depth>
 #include <osg/Geode>
-#include <osgText/text>
+#include <osgText/Text>
 
 namespace skybolt {
 
@@ -35,7 +35,7 @@ VisOrbits::~VisOrbits()
 
 static boost::optional<Orbit> getOrbit(const Entity& entity, double julianDate)
 {
-	if (auto& controller = entity.getFirstComponent<OrbitComponent>())
+	if (const auto& controller = entity.getFirstComponent<OrbitComponent>())
 	{
 		return controller->orbit;
 	}

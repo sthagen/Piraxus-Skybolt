@@ -4,8 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#pragma once
-
 #include "PlanetSubdivisionPredicate.h"
 #include "SkyboltVis/OsgGeocentric.h"
 #include "SkyboltVis/OsgMathHelpers.h"
@@ -24,7 +22,7 @@ bool PlanetSubdivisionPredicate::operator()(const Box2d& bounds, const QuadTreeT
 		return false;
 	}
 
-	Box2d latLonBounds(swapComponentsVec2(bounds.minimum), swapComponentsVec2(bounds.maximum));
+	Box2d latLonBounds(math::vec2SwapComponents(bounds.minimum), math::vec2SwapComponents(bounds.maximum));
 
 	osg::Vec2d latLon = nearestPointInSolidBox(observerLatLon, latLonBounds);
 
