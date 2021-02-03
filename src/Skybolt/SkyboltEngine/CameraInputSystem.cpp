@@ -16,13 +16,13 @@ namespace skybolt {
 
 using namespace sim;
 
-CameraInputSystem::CameraInputSystem(const vis::Window* visWindow, const EntityPtr& camera, const InputPlatformPtr& inputPlatform, const std::vector<LogicalAxisPtr>& axes) :
-	mWindow(visWindow),
+CameraInputSystem::CameraInputSystem(const EntityPtr& camera, const InputPlatformPtr& inputPlatform, const std::vector<LogicalAxisPtr>& axes) :
 	mCamera(camera),
 	mInputPlatform(inputPlatform),
 	mInputAxes(axes),
 	mInput(CameraController::Input::zero())
 {
+	assert(mEnabled);
 	mInputPlatform->getEventEmitter()->addEventListener<MouseEvent>(this);
 }
 
@@ -33,8 +33,17 @@ CameraInputSystem::~CameraInputSystem()
 
 void CameraInputSystem::updatePostDynamics(const System::StepArgs& args)
 {
-	mInput.forwardSpeed = mInputAxes[0]->getState();
-	mInput.rightSpeed = mInputAxes[1]->getState();
+	if (!mEnabled)
+	{
+		return;
+	}
+
+	if (mInputAxes.size() == 2)
+	{
+		mInput.forwardSpeed = mInputAxes[0]->getState();
+		mInput.rightSpeed = mInputAxes[1]->getState();
+	}
+
 	mInput.panSpeed /= args.dtWallClock;
 	mInput.tiltSpeed /= args.dtWallClock;
 	mInput.zoomSpeed /= args.dtWallClock;
@@ -52,8 +61,19 @@ void CameraInputSystem::updatePostDynamics(const System::StepArgs& args)
 	{
 		cameraControllerComponent->cameraController->update(args.dtWallClock);
 	}
+}
 
-	getVisCamera(*mCamera)->setAspectRatio((float)mWindow->getWidth() / (float)mWindow->getHeight());
+void CameraInputSystem::setInputEnabled(bool enabled)
+{
+	if (enabled && !mEnabled)
+	{
+		mInputPlatform->getEventEmitter()->addEventListener<MouseEvent>(this);
+	}
+	else if (!enabled && mEnabled)
+	{
+		mInputPlatform->getEventEmitter()->removeEventListener(this);
+	}
+	mEnabled = enabled;
 }
 
 void CameraInputSystem::onEvent(const Event &event)
