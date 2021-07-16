@@ -24,12 +24,12 @@
 
 namespace skybolt {
 
-static void registerAssetModule(const std::string& folderName)
+static void registerAssetPackage(const std::string& folderPath)
 {
-	osgDB::Registry::instance()->getDataFilePathList().push_back("Assets/" + folderName + "/");
+	osgDB::Registry::instance()->getDataFilePathList().push_back(folderPath + "/");
 }
 
-static file::Path locateFile(const std::string& filename, file::FileLocatorMode mode)
+file::Path locateFile(const std::string& filename, file::FileLocatorMode mode)
 {
 	auto resolvedFilename = osgDB::Registry::instance()->findDataFile(filename, nullptr, osgDB::CASE_SENSITIVE);
 	if (resolvedFilename.empty())
@@ -47,12 +47,14 @@ static std::vector<std::string> transparentMaterialNames() { return { "transpare
 
 static vis::ModelFactoryPtr createModelFactory(const vis::ShaderPrograms& programs)
 {
+	osg::ref_ptr<osg::Program> glassProgram = programs.getRequiredProgram("glass");
+
 	vis::ModelFactoryConfig config;
-	config.defaultProgram = programs.model;
+	config.defaultProgram = programs.getRequiredProgram("model");
 	for (const std::string& name : transparentMaterialNames())
 	{
 		config.stateSetModifiers[name] = [=](osg::StateSet& stateSet, const osg::Material& material) {
-			stateSet.setAttribute(programs.glass);
+			stateSet.setAttribute(glassProgram);
 			vis::makeStateSetTransparent(stateSet);
 		};
 	}
@@ -64,7 +66,8 @@ EngineRoot::EngineRoot(const EngineRootConfig& config) :
 	mPluginFactories(config.pluginFactories),
 	scheduler(new px_sched::Scheduler),
 	fileLocator(locateFile),
-	simWorld(std::make_unique<sim::World>())
+	simWorld(std::make_unique<sim::World>()),
+	namedObjectRegistry(std::make_shared<sim::NamedObjectRegistry>())
 {
 
 	// Create coreCount threads - 1 background threads, leaving a core for the main thread.
@@ -77,16 +80,43 @@ EngineRoot::EngineRoot(const EngineRootConfig& config) :
 	schedulerParams.num_threads = threadCount;
 	scheduler->init(schedulerParams);
 
-	osgDB::Registry::instance()->getDataFilePathList().push_back("Source/Assets/");
-	osgDB::Registry::instance()->getDataFilePathList().push_back("Assets/");
+	std::vector<std::string> assetSearchPaths = {
+		"Assets/"
+	};
 
-	file::Paths folders = file::findFoldersInDirectory("Assets");
-	for (const auto& folder : folders)
+	if (const char* path = std::getenv("SKYBOLT_ASSETS_PATH"); path)
 	{
-		std::string folderName = folder.stem().string();
-		mAssetFolderNames.push_back(folderName);
-		registerAssetModule(folderName);
-		BOOST_LOG_TRIVIAL(info) << "Registered asset module: " << folderName;
+		auto paths = file::splitByPathListSeparator(std::string(path));
+		assetSearchPaths.insert(assetSearchPaths.begin(), paths.begin(), paths.end());
+	}
+	else
+	{
+		BOOST_LOG_TRIVIAL(warning) << "SKYBOLT_ASSETS_PATH environment variable not set. Skybolt may not be able to find assets. "
+			"Please refer to Skybolt documentation for information about setting this variable.";
+	}
+
+	bool foundCoreAssets = false;
+	for (const auto& assetSearchPath : assetSearchPaths)
+	{
+		file::Paths folders = file::findFoldersInDirectory(assetSearchPath);
+		for (const auto& folder : folders)
+		{
+			std::string folderName = folder.stem().string();
+			mAssetPackagePaths.push_back(folder.string());
+			registerAssetPackage(folder.string());
+			BOOST_LOG_TRIVIAL(info) << "Registered asset package: " << folderName;
+
+			if (folderName == "Core")
+			{
+				foundCoreAssets = true;
+			}
+		}
+	}
+
+	if (!foundCoreAssets)
+	{
+		throw std::runtime_error("Could not find 'Core' assets package. Ensure working directory or SKYBOLT_ASSETS_PATH is set correctly. "
+			"Please refer to Skybolt documentation for information about finding assets.");
 	}
 
 	programs = vis::createShaderPrograms();
@@ -111,14 +141,15 @@ EngineRoot::EngineRoot(const EngineRootConfig& config) :
 	context.scene = scene.get();
 	context.programs = &programs;
 	context.julianDateProvider = julianDateProvider;
-	context.namedObjectRegistry = &namedObjectRegistry;
+	context.namedObjectRegistry = namedObjectRegistry;
 	context.stats = &stats;
 	context.visFactoryRegistry = visFactoryRegistry;
 	context.tileSourceFactory = std::make_shared<vis::JsonTileSourceFactory>(config.tileSourceFactoryConfig);
 	context.modelFactory = createModelFactory(programs);
 	context.fileLocator = locateFile;
+	context.assetPackagePaths = mAssetPackagePaths;
 
-	file::Paths paths = getFilePathsInAssetFolders(*this, "Entities", ".json");
+	file::Paths paths = getFilesWithExtensionInDirectoryInAssetPackages(mAssetPackagePaths, "Entities", ".json");
 	entityFactory.reset(new EntityFactory(context, paths));
 
 	// Create default systems
@@ -144,16 +175,31 @@ EngineRoot::EngineRoot(const EngineRootConfig& config) :
 
 EngineRoot::~EngineRoot()
 {
+	// shutdown all systems first
+	systemRegistry->clear();
 }
 
-file::Paths getFilePathsInAssetFolders(const EngineRoot& engineRoot, const std::string& relativePath, const std::string& extension)
+file::Paths getPathsInAssetPackages(const std::vector<std::string>& assetPackagePaths, const std::string& relativePath)
 {
 	file::Paths result;
-	auto folderNames = engineRoot.getAssetFolderNames();
-	for (const auto& folderName : folderNames)
+	for (const auto& packagePath : assetPackagePaths)
 	{
-		std::string path = "Assets/" + folderName + "/" + relativePath;
-		if (boost::filesystem::exists(path))
+		std::string path = packagePath + "/" + relativePath;
+		if (std::filesystem::exists(path))
+		{
+			result.push_back(path);
+		}
+	}
+	return result;
+}
+
+file::Paths getFilesWithExtensionInDirectoryInAssetPackages(const std::vector<std::string>& assetPackagePaths, const std::string& relativeDirectory, const std::string& extension)
+{
+	file::Paths result;
+	for (const auto& packagePath : assetPackagePaths)
+	{
+		std::string path = packagePath + "/" + relativeDirectory;
+		if (std::filesystem::exists(path))
 		{
 			auto paths = file::findFilenamesInDirectory(path, extension);
 			result.insert(result.end(), paths.begin(), paths.end());

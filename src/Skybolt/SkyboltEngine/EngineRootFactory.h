@@ -16,8 +16,6 @@ class EngineRootFactory
 public:
 	static std::unique_ptr<EngineRoot> create(const boost::program_options::variables_map& params);
 	static std::unique_ptr<EngineRoot> create(const std::vector<PluginFactory>& pluginFactories, const nlohmann::json& settings);
-
-	static nlohmann::json createDefaultSettings();
 };
 
 } // namespace skybolt

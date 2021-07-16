@@ -8,8 +8,6 @@
 #include "ZenithCompassModel.h"
 #include <SkyboltCommon/Math/MathUtility.h>
 
-#include <boost/lexical_cast.hpp>
-
 using namespace skybolt;
 
 ZenithCompassModel::ZenithCompassModel(HudDrawer* drawer, const Parameters &params) :
@@ -55,7 +53,7 @@ void ZenithCompassModel::draw(const glm::vec2 &center, float rotation)
 		glm::vec2 p2 = center + dir * (outerRadius + 0.5f * mParams.headingTickLength + mParams.textGap);
 
 		mDrawer->drawLine(p0, p1);
-		mDrawer->drawText(p2, getTickLabel((float)angle), 0.0f);
+		mDrawer->drawText(p2, getTickLabel((float)angle), 0.0f, -1.0, HudDrawer::Alignment::Center);
 	}
 }
 
@@ -73,5 +71,5 @@ std::string ZenithCompassModel::getTickLabel(float heading)
 			return "W";
 	}
 	int val = (int)std::floor(heading);
-	return boost::lexical_cast<std::string>(val);
+	return std::to_string(val);
 }

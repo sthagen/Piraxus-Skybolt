@@ -10,9 +10,11 @@
 #include "SkyboltVis/SkyboltVisFwd.h"
 #include "SkyboltVis/OsgBox2.h"
 #include "SkyboltVis/VisObject.h"
-#include "SkyboltVis/ShaderProgramRegistry.h"
 #include "SkyboltVis/ShadowHelpers.h"
-#include "SkyboltVis/Renderable/Planet/Tile/OsgTile.h"
+#include "SkyboltVis/Renderable/Forest/GpuForest.h"
+#include "SkyboltVis/Renderable/Planet/Tile/OsgTileFactory.h"
+#include "SkyboltVis/Renderable/Planet/Tile/QuadTreeTileLoader.h"
+#include "SkyboltVis/Shader/ShaderProgramRegistry.h"
 #include <SkyboltCommon/Listenable.h>
 #include <SkyboltCommon/Math/QuadTree.h>
 #include <osg/Matrix>
@@ -21,7 +23,6 @@
 #include <osg/Texture2D>
 
 #include <boost/optional.hpp>
-#include <mutex>
 
 namespace skybolt {
 namespace vis {
@@ -41,31 +42,26 @@ struct PlanetSurfaceConfig
 	const ShaderPrograms* programs;
 	osg::ref_ptr<osg::MatrixTransform> parentTransform; //!< Planet transform
 	PlanetTileSources planetTileSources;
-	float radius;
+	float radius; //!< Radius of planet surface
 	osg::ref_ptr<osg::Texture2D> cloudsTexture; //!< Set to null to disable clouds
 
-	osg::Group* forestGroup; //!< Group under scene root in which to add forests
-	float forestGeoVisibilityRange; //!< range beyond which the forestAlbedoMap will be used
+	std::shared_ptr<OsgTileFactory> osgTileFactory;
 
-	ShadowMaps shadowMaps;
+	GpuForestPtr gpuForest; //!< Can be null
 
 	int elevationMaxLodLevel = 1;
 	int albedoMaxLodLevel = 1;
+	int attributeMinLodLevel = 9;
+	int attributeMaxLodLevel = 9;
 	bool oceanEnabled = true;
 };
 
 struct PlanetSurfaceListener
 {
-	virtual ~PlanetSurfaceListener() {}
-	virtual void tileLoadRequested() {}
-	virtual void tileLoaded() {}
-	virtual void tileLoadCanceled() {}
+	virtual ~PlanetSurfaceListener() = default;
 	virtual void tileAddedToSceneGraph(const skybolt::QuadTreeTileKey& key) {}
 	virtual void tileRemovedFromSceneGraph(const skybolt::QuadTreeTileKey& key) {}
 };
-
-typedef skybolt::DiQuadTree<struct AsyncQuadTreeTile> WorldTileTree;
-typedef std::shared_ptr<WorldTileTree> WorldTileTreePtr;
 
 class PlanetSurface : public skybolt::Listenable<PlanetSurfaceListener>
 {
@@ -78,25 +74,27 @@ public:
 
 	void updatePreRender(const RenderContext& context);
 
+	skybolt::Listenable<QuadTreeTileLoaderListener>* getTileLoaderListenable() const { return mTileSource.get(); }
+
 private:
 	void updateGeometry();
+	OsgTileFactory::TileTextures createTileTextures(const struct PlanetTileImages& images);
 
 private:
 	PlanetTileSources mPlanetTileSources;
 	float mRadius;
-	std::string mCacheDirectory;
 
 	std::unique_ptr<class QuadTreeTileLoader> mTileSource;
-	std::unique_ptr<struct PlanetSubdivisionPredicate> mPredicate;
+	std::shared_ptr<OsgTileFactory> mOsgTileFactory;
+	std::shared_ptr<struct PlanetSubdivisionPredicate> mPredicate;
+	GpuForestPtr mGpuForest;
 
 	osg::ref_ptr<osg::MatrixTransform> mParentTransform;
 	osg::ref_ptr<osg::Group> mGroup;
-	osg::Group* mForestGroup;
-
-	mutable std::shared_mutex mTileSourceMutex;
 
 	typedef std::map<skybolt::QuadTreeTileKey, OsgTile> TileNodeMap;
 	TileNodeMap mTileNodes;
+	std::unique_ptr<class TileTextureCache> mTextureCache;
 };
 
 } // namespace vis

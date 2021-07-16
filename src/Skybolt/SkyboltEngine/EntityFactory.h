@@ -33,15 +33,16 @@ public:
 		vis::VisFactoryRegistryPtr visFactoryRegistry;
 		const vis::ShaderPrograms* programs;
 		JulianDateProvider julianDateProvider;
-		sim::NamedObjectRegistry* namedObjectRegistry;
+		sim::NamedObjectRegistryPtr namedObjectRegistry;
 		ComponentFactoryRegistryPtr componentFactoryRegistry;
 		vis::JsonTileSourceFactoryPtr tileSourceFactory;
 		vis::ModelFactoryPtr modelFactory;
 		EngineStats* stats;
 		file::FileLocator fileLocator;
+		std::vector<std::string> assetPackagePaths;
 	};
 
-	EntityFactory(const Context& context, const std::vector<boost::filesystem::path>& entityFilenames);
+	EntityFactory(const Context& context, const std::vector<std::filesystem::path>& entityFilenames);
 
 	sim::EntityPtr createEntity(const std::string& templateName, const std::string& instanceName = "", const sim::Vector3& position = math::dvec3Zero(), const sim::Quaternion& orientation = math::dquatIdentity()) const;
 

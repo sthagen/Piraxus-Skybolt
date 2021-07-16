@@ -10,6 +10,7 @@
 #include "CaptureImageDailog.h"
 #include "EditorPlugin.h"
 #include "IconFactory.h"
+#include "InputPlatformOis.h"
 #include "QDialogHelpers.h"
 #include "OsgWidget.h"
 #include "RecentFilesMenuPopulator.h"
@@ -31,10 +32,12 @@
 #include "Scenario/ScenarioSerialization.h"
 
 #include <SkyboltEngine/EngineRootFactory.h>
+#include <SkyboltEngine/EngineSettings.h>
 #include <SkyboltEngine/EngineStats.h>
 #include <SkyboltEngine/Scenario.h>
 #include <SkyboltEngine/TemplateNameComponent.h>
 #include <SkyboltEngine/VisObjectsComponent.h>
+#include <SkyboltEngine/Diagnostics/StatsDisplaySystem.h>
 #include <SkyboltEngine/Input/LogicalAxis.h>
 #include <SkyboltEngine/SimVisBinding/CameraSimVisBinding.h>
 #include <SkyboltEngine/SimVisBinding/ForcesVisBinding.h>
@@ -54,11 +57,13 @@
 #include <SkyboltSim/System/SystemRegistry.h>
 #include <SkyboltSim/World.h>
 #include <SkyboltVis/Camera.h>
+#include <SkyboltVis/Shader/OsgShaderHelpers.h>
 #include <SkyboltVis/Scene.h>
 #include <SkyboltVis/Renderable/Arrows.h>
 #include <SkyboltVis/RenderTarget/RenderTargetSceneAdapter.h>
 #include <SkyboltVis/RenderTarget/ViewportHelpers.h>
 #include <SkyboltVis/RenderTarget/Viewport.h>
+#include <SkyboltVis/Shader/ShaderSourceFileChangeMonitor.h>
 #include <SkyboltVis/Window/CaptureScreenshot.h>
 #include <SkyboltVis/Window/Window.h>
 #include <SkyboltCommon/File/OsDirectories.h>
@@ -70,7 +75,7 @@
 
 #include <px_sched/px_sched.h>
 
-#include <boost/filesystem.hpp>
+#include <filesystem>
 #include <boost/log/trivial.hpp>
 
 #include <qabstracttoolwindowmanagerarea.h>
@@ -257,7 +262,7 @@ QString settingsFilenameKey = "settingsFilename";
 // while the latter configures UI defaults.
 static nlohmann::json readOrCreateEngineSettingsFile(QWidget* parent, QSettings& settings)
 {
-	nlohmann::json result = EngineRootFactory::createDefaultSettings();
+	nlohmann::json result = createDefaultEngineSettings();
 	QString settingsFilename = settings.value(settingsFilenameKey).toString();
 
 	while (settingsFilename.isEmpty() || !QFile(settingsFilename).exists())
@@ -280,7 +285,7 @@ static nlohmann::json readOrCreateEngineSettingsFile(QWidget* parent, QSettings&
 			{
 				// Create file
 				settings.setValue(settingsFilenameKey, settingsFilename);
-				boost::filesystem::create_directories(file::Path(settingsFilename.toStdString()).parent_path());
+				std::filesystem::create_directories(file::Path(settingsFilename.toStdString()).parent_path());
 				writeJsonFile(result, settingsFilename.toStdString());
 				return result;
 			}
@@ -319,20 +324,25 @@ MainWindow::MainWindow(const std::vector<PluginFactory>& enginePluginFactories, 
 	ui->actionNewEntityTemplate->setEnabled(false); // Entity Template editing is not implemented
 	mRecentFilesMenuPopulator.reset(new RecentFilesMenuPopulator(ui->menuRecentFiles, &mSettings, fileOpener));
 
+	mEngineSettings = readOrCreateEngineSettingsFile(this, mSettings);
+
+	mEngineRoot = EngineRootFactory::create(enginePluginFactories, mEngineSettings);
+	mSimStepper = std::make_unique<SimStepper>(mEngineRoot->systemRegistry);
+
+	mOsgWidget = new OsgWidget();
+	mRenderTarget = vis::createAndAddViewportToWindow(*mOsgWidget->getWindow(), mEngineRoot->programs.getRequiredProgram("compositeFinal"));
+	mRenderTarget->setScene(std::make_shared<vis::RenderTargetSceneAdapter>(mEngineRoot->scene));
+
+	mStatsDisplaySystem = std::make_shared<StatsDisplaySystem>(*mOsgWidget->getWindow());
+	mStatsDisplaySystem->setVisible(false);
+	mEngineRoot->systemRegistry->push_back(mStatsDisplaySystem);
+
 	mInputPlatform.reset(new InputPlatformOis(std::to_string(size_t(HWND(winId()))), 800, 600)); // TODO: use actual resolution
 	mViewportInput.reset(new ViewportInput(mInputPlatform));
 
 	mInputPlatform->getEventEmitter()->addEventListener<MouseEvent>(this);
 
-	mEngineSettings = readOrCreateEngineSettingsFile(this, mSettings);
-
-	mEngineRoot = EngineRootFactory::create(enginePluginFactories, mEngineSettings);
 	mSprocketModel.reset(new SprocketModel(mEngineRoot.get(), mInputPlatform.get()));
-	mSimStepper = std::make_unique<SimStepper>(mEngineRoot->systemRegistry);
-
-	mOsgWidget = new OsgWidget();
-	mRenderTarget = vis::createAndAddViewportToWindow(*mOsgWidget->getWindow(), mEngineRoot->programs.compositeFinal);
-	mRenderTarget->setScene(std::make_shared<vis::RenderTargetSceneAdapter>(mEngineRoot->scene));
 
 	setProjectFilename("");
 	
@@ -344,23 +354,28 @@ MainWindow::MainWindow(const std::vector<PluginFactory>& enginePluginFactories, 
 	QObject::connect(ui->actionSave_As, SIGNAL(triggered()), this, SLOT(saveAs()));
 	QObject::connect(ui->actionAbout, SIGNAL(triggered()), this, SLOT(about()));
 	QObject::connect(ui->actionExit, SIGNAL(triggered()), this, SLOT(exit()));
+	QObject::connect(ui->actionShowViewportStats, &QAction::triggered, this, [this](bool visible) {mStatsDisplaySystem->setVisible(visible); });
 	QObject::connect(ui->actionCaptureImage, SIGNAL(triggered()), this, SLOT(captureImage()));
 	QObject::connect(ui->actionSettings, SIGNAL(triggered()), this, SLOT(editEngineSettings()));
+	QObject::connect(ui->actionLiveShaderEditing, SIGNAL(triggered(bool)), this, SLOT(setLiveShaderEditingEnabled(bool)));
 	
 	World* world = mEngineRoot->simWorld.get();
+
 	Scenario& scenario = mEngineRoot->scenario;
 
 	mVisNameLabels.reset(new VisNameLabels(world, mEngineRoot->scene->_getGroup(), mEngineRoot->programs));
 
+	osg::ref_ptr<osg::Program> unlitColoredProgram = mEngineRoot->programs.getRequiredProgram("unlitColored");
+
 	{
 		vis::Polyline::Params params;
-		params.program = mEngineRoot->programs.unlitColored;
+		params.program = unlitColoredProgram;
 		mVisOrbits.reset(new VisOrbits(world, mEngineRoot->scene->_getGroup(), params, mEngineRoot->julianDateProvider));
 	}
 	
 	{
 		vis::Arrows::Params params;
-		params.program = mEngineRoot->programs.unlitColored;
+		params.program = unlitColoredProgram;
 
 		mArrows.reset(new vis::Arrows(params));
 		mEngineRoot->scene->addObject(mArrows.get());
@@ -576,6 +591,11 @@ void MainWindow::update()
 	EngineRoot* engineRoot = mSprocketModel->engineRoot;
 
 	engineRoot->scenario.timeSource.update(dt);
+
+	if (mShaderSourceFileChangeMonitor)
+	{
+		mShaderSourceFileChangeMonitor->update();
+	}
 
 	auto simVisSystem = findSystem<SimVisSystem>(*engineRoot->systemRegistry);
 	assert(simVisSystem);
@@ -1109,7 +1129,7 @@ void MainWindow::captureImage()
 	QString defaultSequenceName = "untitled";
 	if (!mProjectFilename.isEmpty())
 	{
-		defaultSequenceName = QString::fromStdString(boost::filesystem::path(mProjectFilename.toStdString()).stem().string());
+		defaultSequenceName = QString::fromStdString(std::filesystem::path(mProjectFilename.toStdString()).stem().string());
 	}
 
 	showCaptureImageSequenceDialog([=](double time, const QString& filename) {
@@ -1136,6 +1156,15 @@ void MainWindow::editEngineSettings()
 		settingsFilename = editor.getSettingsFilename();
 		mSettings.setValue(settingsFilenameKey, settingsFilename);
 		writeJsonFile(editor.getJson(), settingsFilename.toStdString());
+	}
+}
+
+void MainWindow::setLiveShaderEditingEnabled(bool enabled)
+{
+	mShaderSourceFileChangeMonitor.reset();
+	if (enabled)
+	{
+		mShaderSourceFileChangeMonitor = std::make_unique<vis::ShaderSourceFileChangeMonitor>(mEngineRoot->programs);
 	}
 }
 
@@ -1212,7 +1241,7 @@ void MainWindow::setProjectFilename(const QString& filename)
 	if (!mProjectFilename.isEmpty())
 	{
 		;
-		mSprocketModel->removeFileSearchPath(boost::filesystem::path(mProjectFilename.toStdString()).parent_path().string());
+		mSprocketModel->removeFileSearchPath(std::filesystem::path(mProjectFilename.toStdString()).parent_path().string());
 	}
 
 	mProjectFilename = filename;
@@ -1223,7 +1252,7 @@ void MainWindow::setProjectFilename(const QString& filename)
 	}
 	setWindowTitle(title);
 
-	mSprocketModel->addFileSearchPath(boost::filesystem::path(mProjectFilename.toStdString()).parent_path().string());
+	mSprocketModel->addFileSearchPath(std::filesystem::path(mProjectFilename.toStdString()).parent_path().string());
 }
 
 void MainWindow::onEvent(const Event& event)

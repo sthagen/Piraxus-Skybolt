@@ -5,7 +5,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "CameraInputSystem.h"
-#include "Input/InputPlatformOis.h"
+#include "Input/InputPlatform.h"
 #include "Input/LogicalAxis.h"
 #include "SimVisBinding/CameraSimVisBinding.h"
 #include <SkyboltSim/Components/CameraControllerComponent.h>
@@ -67,6 +67,7 @@ void CameraInputSystem::setInputEnabled(bool enabled)
 {
 	if (enabled && !mEnabled)
 	{
+		mInput = CameraController::Input::zero();
 		mInputPlatform->getEventEmitter()->addEventListener<MouseEvent>(this);
 	}
 	else if (!enabled && mEnabled)

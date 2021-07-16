@@ -12,7 +12,8 @@
 #include <osg/Camera>
 #include <osg/Texture2D>
 
-using namespace skybolt::vis;
+namespace skybolt {
+namespace vis {
 
 RenderTexture::RenderTexture(const RenderTextureConfig& config) :
 	RenderTarget(new osg::Camera),
@@ -20,6 +21,8 @@ RenderTexture::RenderTexture(const RenderTextureConfig& config) :
 	mDepthTextureFactory(config.depthTextureFactory),
 	mMultisampleSampleCount(config.multisampleSampleCount)
 {
+	mOsgCamera->setProjectionMatrix(osg::Matrix::ortho2D(-1, 1, -1, 1));
+	mOsgCamera->setViewMatrix(osg::Matrix::identity());
 	mOsgCamera->setReferenceFrame(osg::Transform::ABSOLUTE_RF);
 	mOsgCamera->setComputeNearFarMode(osg::CullSettings::DO_NOT_COMPUTE_NEAR_FAR);
 	mOsgCamera->setClearColor(osg::Vec4(0, 0, 0, 0));
@@ -47,14 +50,35 @@ void RenderTexture::updatePreRender()
 
 		mTexture = mColorTextureFactory(osg::Vec2i(width, height));
 		mOsgCamera->attach(osg::Camera::COLOR_BUFFER, mTexture, 0, 0, false, mMultisampleSampleCount);
+		colorTextureCreated(mTexture);
 
 		if (mDepthTextureFactory)
 		{
 			auto texture = (*mDepthTextureFactory)(osg::Vec2i(width, height));
 			mOsgCamera->attach(osg::Camera::DEPTH_BUFFER, texture);
+			depthTextureCreated(texture);
 		}
 		mOsgCamera->setViewport(0, 0, width, height);
 	}
 
 	RenderTarget::updatePreRender();
 }
+
+TextureFactory createTextureFactory(GLint internalFormat)
+{
+	return [internalFormat](const osg::Vec2i& size) {
+		osg::ref_ptr<osg::Texture2D> texture = new osg::Texture2D();
+		texture->setTextureSize(size.x(), size.y());
+		texture->setResizeNonPowerOfTwoHint(false);
+		texture->setInternalFormat(internalFormat);
+		texture->setFilter(osg::Texture2D::FilterParameter::MIN_FILTER, osg::Texture2D::FilterMode::LINEAR);
+		texture->setFilter(osg::Texture2D::FilterParameter::MAG_FILTER, osg::Texture2D::FilterMode::LINEAR);
+		texture->setWrap(osg::Texture::WRAP_S, osg::Texture::CLAMP_TO_EDGE);
+		texture->setWrap(osg::Texture::WRAP_T, osg::Texture::CLAMP_TO_EDGE);
+
+		return texture;
+	};
+}
+
+} // namespace vis
+} // namespace skybolt

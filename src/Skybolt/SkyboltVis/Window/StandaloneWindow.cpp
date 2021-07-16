@@ -9,9 +9,8 @@
 #if defined(WIN32)
 #include <osgViewer/api/Win32/GraphicsHandleWin32>
 #else
-#include <osgViewer/api/X11/GraphicsHandleX11>
+#include <osgViewer/api/X11/GraphicsWindowX11>
 #endif
-
 using namespace skybolt::vis;
 
 StandaloneWindow::StandaloneWindow(const RectI& rect)
@@ -30,7 +29,6 @@ StandaloneWindow::StandaloneWindow(const RectI& rect)
 
 	// FIXME: The Viewer's default camera clears the frame before our Camera is rendered from, which clears the frame a second time.
 	// The first frame clearing is unnecessary and should be eliminated.
-
 }
 
 int StandaloneWindow::getWidth() const
@@ -67,7 +65,7 @@ std::string StandaloneWindow::getHandle() const
 #if defined(WIN32)
 	size_t ptr = (size_t)dynamic_cast<osgViewer::GraphicsHandleWin32*>(windows[0])->getHWND();
 #else
-	size_t ptr = (size_t)dynamic_cast<osgViewer::GraphicsHandleX11*>(windows[0])->getDisplay();
+	size_t ptr = (size_t)dynamic_cast<osgViewer::GraphicsWindowX11*>(windows[0])->getWindow();
 #endif
 	return std::to_string(ptr);
 }

@@ -6,12 +6,13 @@
 
 
 #include "FileUtility.h"
-#include <boost/filesystem.hpp>
+#include <filesystem>
+#include <boost/algorithm/string.hpp>  
 
 namespace skybolt {
 namespace file {
 
-namespace fs = boost::filesystem;
+namespace fs = std::filesystem;
 
 static bool isDir(const Path &file)
 {
@@ -100,6 +101,22 @@ Paths findFoldersInDirectory(const std::string &dir)
 	}
 	
 	return result;
+}
+
+std::vector<std::string> splitByPathListSeparator(const std::string& pathList)
+{
+#ifdef _WIN32
+	const std::string pathsep(";");
+#else
+	const std::string pathsep(":");
+#endif
+	std::vector<std::string> vec;
+	boost::split(vec, pathList, boost::is_any_of(pathsep), boost::token_compress_on);
+	for (std::string& item : vec)
+	{
+		boost::trim(item);
+	}
+	return vec;
 }
 
 } // namespace file

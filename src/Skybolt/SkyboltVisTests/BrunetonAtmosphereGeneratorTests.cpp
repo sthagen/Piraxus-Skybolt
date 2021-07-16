@@ -4,11 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include <catch/catch.hpp>
+#include <catch2/catch.hpp>
 #include "Helpers/CaptureTexture.h"
 
 #include <SkyboltVis/Renderable/Atmosphere/Bruneton/BruentonAtmosphereGenerator.h>
 #include <SkyboltVis/Window/OffscreenViewer.h>
+#include <SkyboltCommon/Stringify.h>
 #include <SkyboltCommon/Math/MathUtility.h>
 
 #include <osg/Camera>
@@ -30,7 +31,8 @@ static void registerResourceSearchPath(const std::string& path)
 
 static void registerShaderSearchPath()
 {
-	registerResourceSearchPath("Source/Assets/");
+	registerResourceSearchPath("Assets/Core");
+	registerResourceSearchPath(STRINGIFY(CMAKE_SOURCE_DIR) "/Assets/Core");
 }
 
 constexpr float epsilon = 0.00013f;

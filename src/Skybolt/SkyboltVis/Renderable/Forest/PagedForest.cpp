@@ -11,8 +11,8 @@
 #include "SkyboltVis/GeoImageHelpers.h"
 #include "SkyboltVis/LlaToNedConverter.h"
 #include "SkyboltVis/OsgMathHelpers.h"
-#include "SkyboltVis/ShaderProgramRegistry.h"
 #include "SkyboltVis/Scene.h"
+#include "SkyboltVis/Shader/ShaderProgramRegistry.h"
 #include <SkyboltCommon/Math/MathUtility.h>
 #include <osg/Geode>
 #include <atomic>
@@ -59,7 +59,7 @@ public:
 		const float treesPerSquareMeter = 0.01f;
 		const float radiusOfEarth = 6371000.0f;
 		attribute.density = treesPerSquareMeter * radiusOfEarth * radiusOfEarth; // trees per sterradian
-		image.attributes[9] = attribute;
+		image.attributes[2] = attribute;
 
 		ForestGenerator generator;
 		std::vector<BillboardForest::Tree> trees = generator.generate(*mElevationProvider, image, worldBounds, imageBounds);
@@ -73,7 +73,7 @@ public:
 		}
 
 		osg::Group* group = new osg::Group;
-		BillboardForest::addGeodes(*group, trees, mPrograms->treeSideBillboard, mPrograms->treeTopBillboard, mVisRangeWorldUnits);
+		BillboardForest::addGeodes(*group, trees, mPrograms->getRequiredProgram("treeSideBillboard"), mPrograms->getRequiredProgram("treeTopBillboard"), mVisRangeWorldUnits);
 		return group;
 	}
 

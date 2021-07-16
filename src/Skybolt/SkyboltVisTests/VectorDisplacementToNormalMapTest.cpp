@@ -5,12 +5,12 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 
-#include <catch/catch.hpp>
+#include <catch2/catch.hpp>
 
+#include <SkyboltVis/Shader/ShaderProgramRegistry.h>
 #include <SkyboltVis/TextureGenerator/GpuTextureGenerator.h>
 #include "SkyboltVis/TextureGenerator/GpuTextureGeneratorStateSets.h"
 #include <SkyboltVis/Window/OffscreenViewer.h>
-#include <SkyboltVis/ShaderProgramRegistry.h>
 
 #include <osgDB/WriteFile>
 

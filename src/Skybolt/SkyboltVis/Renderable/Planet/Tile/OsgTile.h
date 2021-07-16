@@ -19,11 +19,7 @@ struct OsgTile
 {
 	osg::ref_ptr<osg::MatrixTransform> transform;
 	TerrainPtr highResTerrain; //!< optional
-	PagedForestPtr forest; //!< optional
-	osg::Vec2f tileCenter;
 	osg::Uniform* modelMatrixUniform;
-	osg::ref_ptr<osg::Image> heightImage;
-	Box2d heightImageLatLonBounds;
 };
 
 } // namespace vis

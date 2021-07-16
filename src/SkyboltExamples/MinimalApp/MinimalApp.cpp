@@ -11,7 +11,8 @@
 #include <SkyboltEngine/EngineRoot.h>
 #include <SkyboltEngine/EngineRootFactory.h>
 #include <SkyboltEngine/EntityFactory.h>
-#include <SkyboltEngine/Input/InputPlatformOis.h>
+#include <SkyboltEngine/Diagnostics/StatsDisplaySystem.h>
+#include <SkyboltEngine/Input/InputPlatformOsg.h>
 #include <SkyboltEngine/Input/InputSystem.h>
 #include <SkyboltEngine/Input/LogicalAxis.h>
 #include <SkyboltEngine/SimVisBinding/CameraSimVisBinding.h>
@@ -71,16 +72,16 @@ int main(int argc, char *argv[])
 		viewport->setCamera(getVisCamera(*simCamera));
 
 		// Create input
-		InputPlatformOisPtr inputPlatform(new InputPlatformOis(window->getHandle(), window->getWidth(), window->getHeight()));
+		auto inputPlatform = std::make_shared<InputPlatformOsg>(window->getViewerPtr());
 		std::vector<LogicalAxisPtr> axes = CameraInputSystem::createDefaultAxes(*inputPlatform);
 
 		// Create systems
 		engineRoot->systemRegistry->push_back(std::make_shared<InputSystem>(inputPlatform, window.get(), axes));
 		engineRoot->systemRegistry->push_back(std::make_shared<CameraInputSystem>(simCamera, inputPlatform, axes));
 
-//#define SHOW_STATS // FIXME: enabling stats adds an unacceptable performance hit due to drawing the hud text
+//#define SHOW_STATS
 #ifdef SHOW_STATS
-		engineRoot->systemRegistry->push_back(std::make_shared<StatsDisplaySystem>(window, *engineRoot->scene));
+		engineRoot->systemRegistry->push_back(std::make_shared<StatsDisplaySystem>(*window));
 #endif
 
 		// Create entities

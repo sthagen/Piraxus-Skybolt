@@ -9,11 +9,35 @@
 
 #include "HudDrawer.h"
 
+namespace skybolt {
+
 class PitchLadderModel
 {
 public:
-	PitchLadderModel(HudDrawer* drawer, float pitchAngleIncrement, float pitchGapHeight, float lineWidth, float wingletHeight, float textGap, float maxPitchAngle = skybolt::math::halfPiF());
+	struct Parameters
+	{
+		void makeDefault()
+		{
+			pitchAngleIncrement = 10.f * math::degToRadF();
+			pitchGapHeight = 0.05f;
+			lineWidth = 0.3f;
+			wingletHeight = 0.01f;
+			textOffset = 0.03f;
+			maxPitchAngle = math::halfPiF();
+		}
+
+		float pitchAngleIncrement;
+		float pitchGapHeight;
+		float lineWidth;
+		float wingletHeight;
+		float textOffset;
+		float maxPitchAngle;
+	};
+
+	PitchLadderModel(HudDrawer* drawer, const Parameters& param);
 	void draw(float pitch, float roll);
+
+	void setPitchGapHeight(double height) { mParam.pitchGapHeight = height; }
 
 protected:
 	void drawRung(float rungPitch, float pitch, float roll, float width, const HudDrawer::DashedLineParams* params = 0);
@@ -22,12 +46,8 @@ protected:
 private:
 
 	HudDrawer* mDrawer;
-	float mPitchAngleIncrement;
-	float mPitchGapHeight;
-	float mLineWidth;
-	float mWingletHeight;
-	float mTextGap;
-	float mMaxPitchAngle;
+	Parameters mParam;
 	HudDrawer::DashedLineParams mDashedLineParams;
 };
 
+} // namespace skybolt

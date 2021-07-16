@@ -5,6 +5,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "EntityFactory.h"
+#include "EngineRoot.h"
 #include "EngineStats.h"
 #include "TemplateNameComponent.h"
 #include "VisObjectsComponent.h"
@@ -34,16 +35,17 @@
 #include <SkyboltVis/OsgImageHelpers.h>
 #include <SkyboltVis/OsgStateSetHelpers.h>
 #include <SkyboltVis/Scene.h>
-#include <SkyboltVis/ShaderProgramRegistry.h>
 #include <SkyboltVis/ElevationProvider/TilePlanetAltitudeProvider.h>
 #include <SkyboltVis/Renderable/Atmosphere/Bruneton/BruentonAtmosphere.h>
 #include <SkyboltVis/Renderable/CameraRelativeBillboard.h>
+#include <SkyboltVis/Renderable/Forest/GpuForest.h>
 #include <SkyboltVis/Renderable/Polyline.h>
 #include <SkyboltVis/Renderable/Planet/Planet.h>
 #include <SkyboltVis/Renderable/Planet/Tile/TileSource/JsonTileSourceFactory.h>
 #include <SkyboltVis/Renderable/Stars/Starfield.h>
 #include <SkyboltVis/Renderable/Model/Model.h>
 #include <SkyboltVis/Renderable/Model/ModelFactory.h>
+#include <SkyboltVis/Shader/ShaderProgramRegistry.h>
 
 #include <SkyboltCommon/StringVector.h>
 #include <SkyboltCommon/File/FileUtility.h>
@@ -51,7 +53,7 @@
 #include <SkyboltCommon/Json/ReadJsonFile.h>
 #include <SkyboltCommon/Math/MathUtility.h>
 
-#include <boost/filesystem.hpp>
+#include <filesystem>
 
 #include <osg/BlendFunc>
 #include <osg/Depth>
@@ -146,7 +148,7 @@ static osg::Quat readOptionalQuat(const nlohmann::json& j, const std::string& na
 
 static std::string getParentDirectory(const std::string& filename)
 {
-	boost::filesystem::path p(filename);
+	std::filesystem::path p(filename);
 	return p.parent_path().string();
 }
 
@@ -221,16 +223,18 @@ static void loadVisualCamera(Entity* entity, const EntityFactory::Context& conte
 	simVisBindingComponent->bindings.push_back(cameraSimVisBinding);
 }
 
-struct PlanetStatsUpdater : vis::PlanetSurfaceListener, sim::Component
+struct PlanetStatsUpdater : vis::PlanetSurfaceListener, vis::QuadTreeTileLoaderListener, sim::Component
 {
 	PlanetStatsUpdater(EngineStats* stats, vis::PlanetSurface* surface)
 		: mStats(stats), mSurface(surface)
 	{
 		mSurface->addListener(this);
+		mSurface->getTileLoaderListenable()->addListener(this);
 	}
 
 	~PlanetStatsUpdater()
 	{
+		mSurface->getTileLoaderListenable()->removeListener(this);
 		mSurface->removeListener(this);
 		mStats->tileLoadQueueSize -= mOwnTilesLoading;
 	}
@@ -280,6 +284,7 @@ static void loadPlanet(Entity* entity, const EntityFactory::Context& context, co
 	config.innerRadius = planetRadius;
 	config.visFactoryRegistry = context.visFactoryRegistry.get();
 	config.waterEnabled = hasOcean;
+	config.fileLocator = context.fileLocator;
 	
 	{
 		auto it = json.find("clouds");
@@ -348,14 +353,31 @@ static void loadPlanet(Entity* entity, const EntityFactory::Context& context, co
 	if (it != layers.end())
 	{
 		config.planetTileSources.attribute = context.tileSourceFactory->createTileSourceFromJson(*it);
+		config.attributeMinLodLevel = it->at("minLevel");
+		config.attributeMaxLodLevel = it->at("maxLevel");
 	}
 
 	{
 		auto it = json.find("features");
 		if (it != json.end())
 		{
-			const nlohmann::json& features = it.value();
-			config.featuresDirectory = context.fileLocator(features.at("directory"), file::FileLocatorMode::Required);
+			std::string directory = it.value().at("directory");
+			config.featureTreeFiles = getPathsInAssetPackages(context.assetPackagePaths, directory + "/tree.json");
+			config.featureTilesDirectoryRelAssetPackage = directory;
+		}
+	}
+
+	std::optional<vis::ForestParams> forestParams;
+	{
+		auto it = json.find("forest");
+		if (it != json.end())
+		{
+			vis::ForestParams params;
+			params.forestGeoVisibilityRange = 8192;
+			params.treesPerLinearMeter = it.value().at("treesPerLinearMeter");
+			params.minTileLodLevelToDisplayForest = it.value().at("minLevel");
+			params.maxTileLodLevelToDisplayForest = std::max(config.elevationMaxLodLevel, config.attributeMaxLodLevel);
+			config.forestParams = params;
 		}
 	}
 
@@ -458,7 +480,7 @@ EntityPtr EntityFactory::createEntityFromJson(const nlohmann::json& json, const 
 	return entity;
 }
 
-EntityFactory::EntityFactory(const EntityFactory::Context& context, const std::vector<boost::filesystem::path>& entityFilenames) :
+EntityFactory::EntityFactory(const EntityFactory::Context& context, const std::vector<std::filesystem::path>& entityFilenames) :
 	mContext(context)
 {
 	assert(context.julianDateProvider);
@@ -475,7 +497,7 @@ EntityFactory::EntityFactory(const EntityFactory::Context& context, const std::v
 		{"Polyline", [this] {return createPolyline(); }}
 	};
 
-	for (const boost::filesystem::path& filename : entityFilenames)
+	for (const std::filesystem::path& filename : entityFilenames)
 	{
 		std::string name = filename.stem().string();
 		mTemplateJsonMap[name] = readJsonFile(filename.string());
@@ -521,7 +543,7 @@ const float moonDiameter = 2.0f * tan(skybolt::math::degToRadF() * 0.52f * 0.5f)
 EntityPtr EntityFactory::createSun() const
 {
 	osg::StateSet* ss = new osg::StateSet;
-	ss->setAttribute(mContext.programs->sun);
+	ss->setAttribute(mContext.programs->getRequiredProgram("sun"));
 	ss->setMode(GL_CULL_FACE, osg::StateAttribute::OFF);
 
 	osg::Depth* depth = new osg::Depth;
@@ -566,7 +588,7 @@ EntityPtr EntityFactory::createSun() const
 EntityPtr EntityFactory::createMoon() const
 {
 	osg::StateSet* ss = new osg::StateSet;
-	ss->setAttribute(mContext.programs->moon);
+	ss->setAttribute(mContext.programs->getRequiredProgram("moon"));
 	ss->setMode(GL_CULL_FACE, osg::StateAttribute::OFF);
 
 	osg::Depth* depth = new osg::Depth;
@@ -601,7 +623,7 @@ EntityPtr EntityFactory::createMoon() const
 EntityPtr EntityFactory::createStars() const
 {
 	vis::StarfieldConfig config;
-	config.program = mContext.programs->starfield;
+	config.program = mContext.programs->getRequiredProgram("starfield");
 	vis::RootNodePtr starfield(new vis::Starfield(config));
 
 	auto calcStarfieldEclipticPosition = [](double julianDate) { return LatLon(0, 0); };
@@ -624,7 +646,7 @@ EntityPtr EntityFactory::createStars() const
 EntityPtr EntityFactory::createPolyline() const
 {
 	vis::Polyline::Params params;
-	params.program = mContext.programs->unlitColored;
+	params.program = mContext.programs->getRequiredProgram("unlitColored");
 
 	vis::PolylinePtr polyline(new vis::Polyline(params));
 

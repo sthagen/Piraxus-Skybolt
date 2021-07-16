@@ -6,7 +6,7 @@
 
 #pragma once
 
-#include <boost/filesystem.hpp>
+#include <filesystem>
 
 #include <string>
 #include <vector>
@@ -14,7 +14,7 @@
 namespace skybolt {
 namespace file {
 
-using Path = boost::filesystem::path;
+using Path = std::filesystem::path;
 
 typedef std::vector<Path> Paths;
 
@@ -27,6 +27,9 @@ Paths findFilenamesInDirectoryRecursive(const std::string &dir, const std::strin
 
 //! @returns paths of folders in a directory
 Paths findFoldersInDirectory(const std::string &dir);
+
+//! Splits path list, e.g PATH environment variable, by platform specific separator, ';' on windows and ':' on unix.
+std::vector<std::string> splitByPathListSeparator(const std::string& pathList);
 
 } // namespace file
 } // namespace skybolt

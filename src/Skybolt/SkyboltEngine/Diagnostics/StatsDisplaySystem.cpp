@@ -12,9 +12,10 @@
 
 namespace skybolt {
 
-StatsDisplaySystem::StatsDisplaySystem(const vis::Window& window, vis::Scene& scene)
+StatsDisplaySystem::StatsDisplaySystem(const vis::Window& window)
 {
-	osgViewer::Viewer& viewer = *window._getViewer();
+	osgViewer::Viewer& viewer = window.getViewer();
+	mCamera = window.getRenderTargets().back().target->getOsgCamera();
 
 	mViewerStats = viewer.getStats();
 	mCameraStats = viewer.getCamera()->getStats();
@@ -30,13 +31,35 @@ StatsDisplaySystem::StatsDisplaySystem(const vis::Window& window, vis::Scene& sc
 		mCameraStats->collectStats("scene", true);
 	}
 
-	const float aspectRatio = (float)window.getWidth() / (float)window.getHeight();
-	mStatsHud = std::make_unique<VisHud>(aspectRatio);
-	scene.addObject(mStatsHud.get());
+	mStatsHud = osg::ref_ptr<VisHud>(new VisHud());
+	mCamera->addChild(mStatsHud);
+}
+
+StatsDisplaySystem::~StatsDisplaySystem()
+{
+	setVisible(false);
+}
+
+void StatsDisplaySystem::setVisible(bool visible)
+{
+	bool currentlyVisible = (mStatsHud->getNumParents() > 0);
+	if (visible && !currentlyVisible)
+	{
+		mCamera->addChild(mStatsHud);
+	}
+	else if (!visible && currentlyVisible)
+	{
+		mCamera->removeChild(mStatsHud);
+	}
 }
 
 void StatsDisplaySystem::updatePostDynamics(const System::StepArgs& args)
 {
+	osg::Viewport* viewport = mCamera->getViewport();
+	mStatsHud->setAspectRatio(viewport->width() / viewport->height());
+
+	mStatsHud->clear();
+
 	int line = 0;
 	int frameNumber = mViewerStats->getLatestFrameNumber() - 1;
 
@@ -44,9 +67,12 @@ void StatsDisplaySystem::updatePostDynamics(const System::StepArgs& args)
 	auto attributes2 = mCameraStats->getAttributeMap(frameNumber);
 	attributes.insert(attributes2.begin(), attributes2.end());
 
+	const float lineHeight = 0.05f;
+	const float textSize = lineHeight * 0.8f;
+
 	for (const auto& value : attributes)
 	{
-		mStatsHud->drawText(glm::vec2(-0.9f, 0.9f - line * 0.05f), value.first + ": " + std::to_string(value.second), 0.0f, 0.2);
+		mStatsHud->drawText(glm::vec2(-0.9f, 0.9f - line * lineHeight), value.first + ": " + std::to_string(value.second), 0.0f, textSize);
 		++line;
 	}
 }

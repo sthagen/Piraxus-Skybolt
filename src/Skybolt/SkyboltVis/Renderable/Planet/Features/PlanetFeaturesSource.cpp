@@ -9,9 +9,9 @@
 #include <SkyboltCommon/Math/MathUtility.h>
 #include <nlohmann/json.hpp>
 
-#include <boost/filesystem.hpp>
-#include <limits>
+#include <filesystem>
 #include <fstream>
+#include <limits>
 #include <iostream>
 #include <iomanip>
 #include <sstream>
@@ -407,12 +407,12 @@ static nlohmann::json tileToJsonRecursive(const FeatureTile& tile)
 	return j;
 }
 
-static void jsonToTileRecursive(FeatureTile& tile, WorldFeatures::QuadTree& tree, const nlohmann::json& j)
+static void addJsonTilesToTreeRecursive(FeatureTile& tile, WorldFeatures::QuadTree& tree, const nlohmann::json& j)
 {
 	tile.key.level = j["level"];
 	tile.key.x = j["x"];
 	tile.key.y = j["y"];
-	tile.featureCountInFile = j["featureCount"];
+	tile.featureCountInFile += j["featureCount"];
 	
 	auto it = j.find("children");
 	if (it != j.end())
@@ -426,10 +426,13 @@ static void jsonToTileRecursive(FeatureTile& tile, WorldFeatures::QuadTree& tree
 			}
 			else
 			{
-				tree.subdivide(tile);
+				if (!tile.hasChildren())
+				{
+					tree.subdivide(tile);
+				}
 				for (int i = 0; i < children.size(); ++i)
 				{
-					jsonToTileRecursive(*tile.children[i], tree, children[i]);
+					addJsonTilesToTreeRecursive(*tile.children[i], tree, children[i]);
 				}
 			}
 		}
@@ -446,7 +449,7 @@ static void saveTileRecursive(const FeatureTile& tile, const std::string& direct
 	if (!tile.features.empty())
 	{
 		std::string tileDirectory = directory + "/" + std::to_string(tile.key.level) + "/" + std::to_string(tile.key.x);
-		boost::filesystem::create_directories(tileDirectory);
+		std::filesystem::create_directories(tileDirectory);
 		saveTile(tile, tileDirectory + "/" + std::to_string(tile.key.y) + ".ftr");
 	}
 
@@ -463,7 +466,7 @@ static const std::string treeFilename = "tree.json";
 
 void save(const WorldFeatures::DiQuadTree& tree, const std::string& directory)
 {
-	boost::filesystem::create_directory(directory);
+	std::filesystem::create_directories(directory);
 	std::ofstream f(directory + "/" + treeFilename, std::ios::out | std::ios::binary);
 
 	nlohmann::json j;
@@ -478,23 +481,23 @@ void save(const WorldFeatures::DiQuadTree& tree, const std::string& directory)
 	saveTileRecursive(tree.rightTree.getRoot(), directory);
 }
 
-void loadJsonFromDirectory(WorldFeatures& features, const std::string& directory)
+void addJsonFileTilesToTree(WorldFeatures& features, const std::string& filename)
 {
 	WorldFeatures::DiQuadTree& tree = features.tree;
 
-	std::ifstream f(directory + "/" + treeFilename, std::ios::in | std::ios::binary);
+	std::ifstream f(filename, std::ios::in | std::ios::binary);
 	if (f.is_open())
 	{
 		nlohmann::json j;
 		f >> j;
 		f.close();
 
-		jsonToTileRecursive(tree.leftTree.getRoot(), tree.leftTree, j["leftRoot"]);
-		jsonToTileRecursive(tree.rightTree.getRoot(), tree.rightTree, j["rightRoot"]);
+		addJsonTilesToTreeRecursive(tree.leftTree.getRoot(), tree.leftTree, j["leftRoot"]);
+		addJsonTilesToTreeRecursive(tree.rightTree.getRoot(), tree.rightTree, j["rightRoot"]);
 	}
 	else
 	{
-		throw skybolt::Exception("Could not load WorldFeatures tree from directory: " + directory);
+		throw skybolt::Exception("Could not load WorldFeatures tree from file: " + filename);
 	}
 }
 

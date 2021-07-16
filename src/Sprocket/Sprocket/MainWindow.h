@@ -9,7 +9,6 @@
 #include "SprocketFwd.h"
 #include "WorldTreeWidget.h"
 #include <SkyboltEngine/EngineRoot.h>
-#include <SkyboltEngine/Input/InputPlatformOis.h>
 #include <SkyboltEngine/Plugin/PluginHelpers.h>
 #include <SkyboltSim/SkyboltSimFwd.h>
 #include <SkyboltCommon/Event.h>
@@ -58,6 +57,7 @@ private slots:
 	void exit();
 	void captureImage();
 	void editEngineSettings();
+	void setLiveShaderEditingEnabled(bool enabled);
 
 	void toolWindowActionToggled(bool state);
 	void toolWindowVisibilityChanged(QWidget* toolWindow, bool visible);
@@ -99,6 +99,8 @@ private:
 	std::unique_ptr<Ui::MainWindow> ui;
 	QToolWindowManager* mToolWindowManager;
 	std::vector<QAction*> mToolActions;
+	std::unique_ptr<skybolt::vis::ShaderSourceFileChangeMonitor> mShaderSourceFileChangeMonitor;
+	std::shared_ptr<skybolt::StatsDisplaySystem> mStatsDisplaySystem;
 
 	class EntitiesTableModel* mEntitiesTableModel;
 	class PictureTableModel* mPictureTableModel;
@@ -106,7 +108,7 @@ private:
 	std::shared_ptr<class PropertiesModel> mPropertiesModel;
 
 	bool mDisableInputSystemOnNextUpdate = false;
-	std::shared_ptr<skybolt::InputPlatformOis> mInputPlatform;
+	std::shared_ptr<skybolt::InputPlatform> mInputPlatform;
 	std::unique_ptr<class ViewportInput> mViewportInput;
 
 	skybolt::vis::ArrowsPtr mArrows;

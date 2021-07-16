@@ -6,7 +6,6 @@
 
 #include "PlanetFeatures.h"
 #include "SkyboltSim/Spatial/GreatCircle.h"
-#include "SkyboltVis/ShaderProgramRegistry.h"
 #include "SkyboltVis/LlaToNedConverter.h"
 #include "SkyboltVis/OsgGeocentric.h"
 #include "SkyboltVis/Scene.h"
@@ -14,6 +13,7 @@
 #include "SkyboltVis/Renderable/RoadsBatch.h"
 #include "SkyboltVis/Renderable/RunwaysBatch.h"
 #include "SkyboltVis/Renderable/Water/LakesBatch.h"
+#include "SkyboltVis/Shader/ShaderProgramRegistry.h"
 
 #include <SkyboltCommon/Math/MathUtility.h>
 #include <SkyboltCommon/Math/QuadTreeUtility.h>
@@ -144,17 +144,19 @@ public:
 			}
 		}
 
+		osg::ref_ptr<osg::Program> modelProgram = mPrograms->getRequiredProgram("model");
+
 		// Create roads
 		if (!roads.empty())
 		{
-			RoadsBatchPtr visRoads(new RoadsBatch(roads, mPrograms->model));
+			RoadsBatchPtr visRoads(new RoadsBatch(roads, modelProgram));
 			objects.nodes[PlanetFeaturesParams::groupsNonBuildingsIndex].push_back(visRoads);
 		}
 
 		// Create poly regions
 		if (!polyRegions.empty())
 		{
-			RoadsBatchPtr visPolyRegions(new RoadsBatch(polyRegions, mPrograms->model));
+			RoadsBatchPtr visPolyRegions(new RoadsBatch(polyRegions, modelProgram));
 			objects.nodes[PlanetFeaturesParams::groupsNonBuildingsIndex].push_back(visPolyRegions);
 		}
 
@@ -162,14 +164,14 @@ public:
 		// Runways are created after poly regions to ensure runways draw on top.
 		if (!runways.empty())
 		{
-			RunwaysBatchPtr visRunways(new RunwaysBatch(runways, mPrograms->model, mPrograms->modelText));
+			RunwaysBatchPtr visRunways(new RunwaysBatch(runways, modelProgram, mPrograms->getRequiredProgram("modelText")));
 			objects.nodes[PlanetFeaturesParams::groupsNonBuildingsIndex].push_back(visRunways);
 		}
 
 		// Create batches for rendering
 		if (!buildings.empty())
 		{
-			BuildingsBatchPtr visBuildings(new BuildingsBatch(buildings, mPrograms->building, mShadowMaps));
+			BuildingsBatchPtr visBuildings(new BuildingsBatch(buildings, mPrograms->getRequiredProgram("building"), mShadowMaps));
 			objects.nodes[PlanetFeaturesParams::groupsBuildingsIndex].push_back(visBuildings);
 		}
 
@@ -177,7 +179,7 @@ public:
 		if (!lakes.empty())
 		{
 			LakesConfig visLakesConfig;
-			visLakesConfig.program = mPrograms->lake;
+			visLakesConfig.program = mPrograms->getRequiredProgram("lake");
 			visLakesConfig.waterStateSet = mWaterStateSet;
 
 			LakesBatchPtr visLakes(new LakesBatch(lakes, visLakesConfig));
@@ -204,10 +206,11 @@ std::unique_ptr<FeatureTile> createTile(const QuadTreeTileKey& key, const LatLon
 };
 
 PlanetFeatures::PlanetFeatures(const PlanetFeaturesParams& params) :
-	mTileDirectory(params.directory.string()),
 	mScheduler(params.scheduler),
 	mVisObjectsLoadTask(new VisObjectsLoadTask(params.programs, params.waterStateSet, params.shadowMaps)),
 	mPlanetRadius(params.planetRadius),
+	mFileLocator(params.fileLocator),
+	mTilesDirectoryRelAssetPackage(params.tilesDirectoryRelAssetPackage),
 	mFeatures(createTile)
 {
 	assert(mScheduler);
@@ -217,7 +220,10 @@ PlanetFeatures::PlanetFeatures(const PlanetFeaturesParams& params) :
 		mGroups[i] = params.groups[i];
 	}
 
-	mapfeatures::loadJsonFromDirectory(mFeatures, params.directory.string());
+	for (const auto& path : params.treeFiles)
+	{
+		mapfeatures::addJsonFileTilesToTree(mFeatures, path.string());
+	}
 }
 
 bool shouldTraverse(const VisFeatureTile& tile) { return tile.loaded; }
@@ -286,16 +292,12 @@ void PlanetFeatures::updatePreRender(const RenderContext& context)
 
 void PlanetFeatures::loadTile(VisFeatureTile& tile)
 {
-	if (tile.loaded)
-	{
-		// TODO: If tile is already loaded, just re-clamp it to terrain
-	}
-	else
+	if (!tile.loaded)
 	{
 		if (tile.featureCountInFile > 0)
 		{
 			tile.loaded = true;
-			std::string filename = mTileDirectory + "/" + mapfeatures::getTilePathFromKey(tile.key);
+			std::string filename = mFileLocator(mTilesDirectoryRelAssetPackage + "/" + mapfeatures::getTilePathFromKey(tile.key), file::FileLocatorMode::Required).string();
 			sim::LatLon origin = tile.bounds.center();
 
 			LoadingItemPtr loadingItem(new LoadingItem);
@@ -304,7 +306,7 @@ void PlanetFeatures::loadTile(VisFeatureTile& tile)
 
 			mScheduler->run([=]()
 			{
-				if (!loadingItem->cancel) // if Tile hasn't been cancled by the time the scheduled task runs
+				if (!loadingItem->cancel) // if Tile hasn't been canceled by the time the scheduled task runs
 				{
 					std::vector<mapfeatures::FeaturePtr> features;
 					mapfeatures::loadTile(filename, features);
