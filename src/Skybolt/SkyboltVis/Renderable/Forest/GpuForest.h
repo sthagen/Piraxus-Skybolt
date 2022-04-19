@@ -1,6 +1,13 @@
+/* Copyright 2012-2021 Matthew Reid
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 #pragma once
 
 #include "SkyboltVis/SkyboltVisFwd.h"
+#include "SkyboltVis/Renderable/Planet/Tile/QuadTreeTileLoader.h"
 #include "SkyboltVis/Renderable/Planet/Tile/TileTexture.h"
 #include <SkyboltCommon/Math/QuadTree.h>
 #include <osg/Group>
@@ -17,10 +24,17 @@ struct ForestParams
 	int maxTileLodLevelToDisplayForest = 14; //!< Don't show forest on tiles above this level
 };
 
+struct GpuForestTileTextures
+{
+	TileTexture height;
+	TileTexture attribute;
+};
+
 struct GpuForestConfig
 {
 	ForestParams forestParams;
 	const ShaderPrograms* programs;
+	std::function<GpuForestTileTextures(const TileImages&)> tileTexturesProvider;
 	osg::ref_ptr<osg::Group> parentGroup;
 	osg::ref_ptr<osg::MatrixTransform> parentTransform;
 	double planetRadius;
@@ -32,14 +46,7 @@ public:
 	GpuForest(const GpuForestConfig& config);
 	~GpuForest();
 
-	struct TileTextures
-	{
-		TileTexture height;
-		TileTexture attribute;
-		QuadTreeTileKey key;
-	};
-
-	void terrainTilesUpdated(const std::vector<TileTextures>& addedTiles, const std::vector<QuadTreeTileKey>& removedTiles);
+	void updateFromTree(const QuadTreeTileLoader::LoadedTileTree& tree);
 
 	void updatePreRender(const RenderContext& context);
 
@@ -50,13 +57,14 @@ private:
 		osg::Vec2d tileCenter;
 	};
 
-	ForestTile createForestTile(const TileTextures& tile);
+	ForestTile createForestTile(const QuadTreeTileKey& key, const GpuForestTileTextures& tile);
 
-	std::shared_ptr<BillboardForest> createBillboardForest(int treeCountPerDimension, int repetitions) const;
+	std::shared_ptr<BillboardForest> createBillboardForest(int treeCountPerDimension, int repetitions, const osg::Vec2& tileBoundsMeters) const;
 
 private:
 	const ForestParams mForestParams;
 	const ShaderPrograms* mPrograms;
+	std::function<GpuForestTileTextures(const TileImages&)> mTileTexturesProvider;
 	osg::ref_ptr<osg::Group> mParentGroup;
 	osg::ref_ptr<osg::MatrixTransform> mParentTransform;
 	double mPlanetRadius;
@@ -68,7 +76,6 @@ private:
 	std::vector<std::shared_ptr<BillboardForest>> mForestGeometries;
 
 	std::map<QuadTreeTileKey, ForestTile> mForestTiles;
-	std::set<QuadTreeTileKey> mTerrainTiles;
 };
 
 } // namespace vis

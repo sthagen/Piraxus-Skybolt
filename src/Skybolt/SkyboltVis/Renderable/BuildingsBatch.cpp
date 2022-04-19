@@ -6,8 +6,9 @@
 
 #include "BuildingsBatch.h"
 #include "earcutOsg.h"
-#include "OsgImageHelpers.h"
+#include "OsgGeometryHelpers.h"
 #include "OsgStateSetHelpers.h"
+#include "Renderable/Planet/Features/BuildingTypes.h"
 
 #include <SkyboltCommon/Random.h>
 
@@ -24,37 +25,6 @@ const float roofUvScale = 1.0f / roofTextureWorldSize;
 namespace skybolt {
 namespace vis {
 
-struct FacadeTexture
-{
-	std::string imageFilename;
-	int buildingLevelsInTexture;
-	int horizontalSectionsInTexture;
-};
-
-std::vector<FacadeTexture> facadeTextures = {
-	{ "Environment/Facade/Facade001_2K_Color.jpg", 10, 16 },
-	{ "Environment/Facade/Facade006_2K_Color.jpg", 8, 14 }
-};
-
-struct RoofTexture
-{
-	std::string imageFilename;
-};
-
-std::vector<RoofTexture> roofTextures = {
-	{ "Environment/Concrete/Concrete006_2K_Color_Brightened.jpg" },
-	{ "Environment/Concrete/Concrete010_2K_Color.jpg" },
-	{ "Environment/Concrete/Concrete017_2K_Color.jpg" }
-};
-
-class BoundingBoxCallback : public osg::Drawable::ComputeBoundingBoxCallback // TODO
-{
-	osg::BoundingBox computeBound(const osg::Drawable & drawable)
-	{
-		return osg::BoundingBox(osg::Vec3f(-FLT_MAX, -FLT_MAX, 0), osg::Vec3f(FLT_MAX, FLT_MAX, 0));
-	}
-};
-
 inline osg::Vec2f toVec2f(const osg::Vec3f& v)
 {
 	return osg::Vec2f(v.x(), v.y());
@@ -70,9 +40,11 @@ static osg::Vec2f getNormal(const std::vector<osg::Vec3f>& points, int i)
 	return osg::Vec2f(dir.y(), -dir.x());
 }
 
-static void createBuilding(const Building& building, const FacadeTexture& facade, int facadeIndex, osg::Vec3Array* posBuffer, osg::Vec3Array* normalBuffer, osg::Vec4Array* uvBuffer, osg::UIntArray* indexBuffer, int buildingIndex)
+static osg::BoundingBoxf createBuilding(const Building& building, const BuildingTypes::Facade& facade, int facadeIndex, osg::Vec3Array* posBuffer, osg::Vec3Array* normalBuffer, osg::Vec4Array* uvBuffer, osg::UIntArray* indexBuffer, int buildingIndex)
 {
 	assert(building.points.size() > 1);
+
+	osg::BoundingBoxf bounds;
 
 	size_t index = posBuffer->size();
 	int pointCount = (int)building.points.size();
@@ -87,10 +59,16 @@ static void createBuilding(const Building& building, const FacadeTexture& facade
 		posBuffer->push_back(v0);
 		posBuffer->push_back(v1);
 
+		bounds.expandBy(v0);
+		bounds.expandBy(v1);
+
 		v0.z() -= building.height;
 		v1.z() -= building.height;
 		posBuffer->push_back(v1);
 		posBuffer->push_back(v0);
+
+		bounds.expandBy(v0);
+		bounds.expandBy(v1);
 
 		// Normals
 		osg::Vec2f normal = getNormal(building.points, i);
@@ -126,11 +104,15 @@ static void createBuilding(const Building& building, const FacadeTexture& facade
 		indexBuffer->push_back(index + 1);
 		index += 4;
 	}
+
+	return bounds;
 }
 
-static void createBuildingRoof(const Building& building, int textureIndex, osg::Vec3Array* posBuffer, osg::Vec3Array* normalBuffer, osg::Vec4Array* uvBuffer, osg::UIntArray* indexBuffer, int buildingIndex)
+static osg::BoundingBoxf createBuildingRoof(const Building& building, int textureIndex, osg::Vec3Array* posBuffer, osg::Vec3Array* normalBuffer, osg::Vec4Array* uvBuffer, osg::UIntArray* indexBuffer, int buildingIndex)
 {
 	assert(building.points.size() > 1);
+
+	osg::BoundingBoxf bounds;
 
 	std::vector<std::vector<osg::Vec3f>> polygon;
 	polygon.push_back(building.points);
@@ -148,8 +130,11 @@ static void createBuildingRoof(const Building& building, int textureIndex, osg::
 	{
 		// Quad vertices
 		osg::Vec3f v0 = building.points[i];
+		bounds.expandBy(v0);
+
 		v0.z() -= building.height;
 		posBuffer->push_back(v0);
+		bounds.expandBy(v0);
 
 		// Normals
 		osg::Vec2f normal = getNormal(building.points, i);
@@ -163,9 +148,10 @@ static void createBuildingRoof(const Building& building, int textureIndex, osg::
 	{
 		indexBuffer->push_back(index + indices[i]);
 	}
+	return bounds;
 }
 
-static osg::Geode* createBuildings(const Buildings& buildings)
+static osg::Geode* createBuildings(const Buildings& buildings, const BuildingTypes& buildingTypes)
 {
 	osg::Vec3Array* posBuffer = new osg::Vec3Array();
 	osg::Vec3Array* normalBuffer = new osg::Vec3Array();
@@ -174,18 +160,19 @@ static osg::Geode* createBuildings(const Buildings& buildings)
 
 	skybolt::Random random(0);
 
+	osg::BoundingBoxf bounds;
 	for (size_t i = 0; i < buildings.size(); ++i)
 	{
 		const Building& building = buildings[i];
 
 		const osg::Vec3f& pos = building.points.front();
 
-		int facadeIndex = i % facadeTextures.size();
+		int facadeIndex = i % buildingTypes.facades.size();
 
-		createBuilding(building, facadeTextures[facadeIndex], facadeIndex, posBuffer, normalBuffer, uvBuffer, indexBuffer, i);
+		bounds.expandBy(createBuilding(building, buildingTypes.facades[facadeIndex], facadeIndex, posBuffer, normalBuffer, uvBuffer, indexBuffer, i));
 
-		int roofTextureIndex = random.getInt(facadeTextures.size(), facadeTextures.size() + roofTextures.size() - 1);
-		createBuildingRoof(building, roofTextureIndex, posBuffer, normalBuffer, uvBuffer, indexBuffer, i);
+		int roofTextureIndex = random.getInt(buildingTypes.facades.size(), buildingTypes.facades.size() + buildingTypes.roofCount - 1);
+		bounds.expandBy(createBuildingRoof(building, roofTextureIndex, posBuffer, normalBuffer, uvBuffer, indexBuffer, i));
 	}
 
     osg::Geode *geode = new osg::Geode();
@@ -196,52 +183,15 @@ static osg::Geode* createBuildings(const Buildings& buildings)
 	geometry->setNormalBinding(osg::Geometry::BIND_PER_VERTEX);
 
 	geometry->setTexCoordArray(0, uvBuffer); 
-	geometry->setUseDisplayList(false); 
-    geometry->setUseVertexBufferObjects(true); 
-	geometry->setUseVertexArrayObject(true);
+	configureDrawable(*geometry);
 
     geometry->addPrimitiveSet(new osg::DrawElementsUInt(osg::PrimitiveSet::TRIANGLES, indexBuffer->size(), (GLuint*)indexBuffer->getDataPointer()));
-	geometry->setComputeBoundingBoxCallback(osg::ref_ptr<BoundingBoxCallback>(new BoundingBoxCallback));
+	geometry->setComputeBoundingBoxCallback(createFixedBoundingBoxCallback(bounds));
     geode->addDrawable(geometry);
     return geode;
 }
 
-static osg::ref_ptr<osg::Texture2DArray> createTextureArray()
-{
-	osg::ref_ptr<osg::Texture2DArray> texture = new osg::Texture2DArray;
-	texture->setInternalFormat(GL_SRGB8);
-	texture->setSourceFormat(GL_RGB);
-	texture->setWrap(osg::Texture::WRAP_S, osg::Texture::REPEAT);
-	texture->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
-	texture->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR_MIPMAP_LINEAR);
-	texture->setUseHardwareMipMapGeneration(true);
-
-	int i = 0;
-	for (const FacadeTexture& facade : facadeTextures)
-	{
-		osg::Image* image = readImageWithCorrectOrientation(facade.imageFilename);
-		image->setInternalTextureFormat(toSrgbInternalFormat(image->getInternalTextureFormat()));
-		texture->setImage(i, image);
-		++i;
-	}
-
-	for (const RoofTexture& roof : roofTextures)
-	{
-		osg::Image* image = readImageWithCorrectOrientation(roof.imageFilename);
-		image->setInternalTextureFormat(toSrgbInternalFormat(image->getInternalTextureFormat()));
-		texture->setImage(i, image);
-		++i;
-	}
-	return texture;
-}
-
-static osg::ref_ptr<osg::Texture2DArray> getTextureArray()
-{
-	static osg::ref_ptr<osg::Texture2DArray> texture = createTextureArray();
-	return texture;
-}
-
-static osg::ref_ptr<osg::StateSet> createStateSet(const osg::ref_ptr<osg::Program>& program, osg::ref_ptr<osg::Texture2DArray> texture, const BuildingsBatch::Uniforms& uniforms, const ShadowMaps& shadowMaps)
+static osg::ref_ptr<osg::StateSet> createStateSet(const osg::ref_ptr<osg::Program>& program, osg::ref_ptr<osg::Texture2DArray> texture, const BuildingsBatch::Uniforms& uniforms)
 {
 	osg::ref_ptr<osg::StateSet> ss(new osg::StateSet);
 	ss->setTextureAttributeAndModes(0, texture);
@@ -250,16 +200,14 @@ static osg::ref_ptr<osg::StateSet> createStateSet(const osg::ref_ptr<osg::Progra
 	ss->setAttribute(program);
 	ss->addUniform(uniforms.modelMatrix);
 
-	addShadowMapsToStateSet(shadowMaps, *ss, 1);
-
 	return ss;
 }
 
-BuildingsBatch::BuildingsBatch(const Buildings& buildings, const osg::ref_ptr<osg::Program>& program, const ShadowMaps& shadowMaps)
+BuildingsBatch::BuildingsBatch(const Buildings& buildings, const osg::ref_ptr<osg::Program>& program, const BuildingTypesPtr& buildingTypes)
 {
-	osg::Geode* geode = createBuildings(buildings);
+	osg::Geode* geode = createBuildings(buildings, *buildingTypes);
 	mUniforms.modelMatrix = new osg::Uniform("modelMatrix", osg::Matrixf());
-	geode->setStateSet(createStateSet(program, getTextureArray(), mUniforms, shadowMaps));
+	geode->setStateSet(createStateSet(program, buildingTypes->texture, mUniforms));
 	mTransform->addChild(geode);
 }
 

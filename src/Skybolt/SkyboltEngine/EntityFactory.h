@@ -35,16 +35,19 @@ public:
 		JulianDateProvider julianDateProvider;
 		sim::NamedObjectRegistryPtr namedObjectRegistry;
 		ComponentFactoryRegistryPtr componentFactoryRegistry;
-		vis::JsonTileSourceFactoryPtr tileSourceFactory;
+		vis::JsonTileSourceFactoryRegistryPtr tileSourceFactoryRegistry;
 		vis::ModelFactoryPtr modelFactory;
 		EngineStats* stats;
 		file::FileLocator fileLocator;
 		std::vector<std::string> assetPackagePaths;
+		nlohmann::json engineSettings;
+		vis::TextureCachePtr textureCache;
 	};
 
 	EntityFactory(const Context& context, const std::vector<std::filesystem::path>& entityFilenames);
 
 	sim::EntityPtr createEntity(const std::string& templateName, const std::string& instanceName = "", const sim::Vector3& position = math::dvec3Zero(), const sim::Quaternion& orientation = math::dquatIdentity()) const;
+	sim::EntityPtr createEntityFromJson(const nlohmann::json& json, const std::string& instanceName, const sim::Vector3& position, const sim::Quaternion& orientation) const;
 
 	typedef std::vector<std::string> Strings;
 	Strings getTemplateNames() const {return mTemplateNames;}
@@ -52,7 +55,6 @@ public:
 	std::string createUniqueObjectName(const std::string& baseName) const;
 
 private:
-	sim::EntityPtr createEntityFromJson(const nlohmann::json& json, const std::string& templateName, const std::string& instanceName, const sim::Vector3& position, const sim::Quaternion& orientation) const;
 
 	sim::EntityPtr createSun() const;
 	sim::EntityPtr createMoon() const;

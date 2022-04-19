@@ -48,10 +48,16 @@ void Entity::updatePreDynamicsSubstep(TimeReal dtSubstep)
 		c->updatePreDynamicsSubstep(dtSubstep);
 }
 
-void Entity::updatePostDynamics()
+void Entity::updatePostDynamicsSubstep(TimeReal dtSubstep)
 {
 	for (const ComponentPtr& c : mComponents.getAllItems())
-		c->updatePostDynamics();
+		c->updatePostDynamicsSubstep(dtSubstep);
+}
+
+void Entity::updatePostDynamics(TimeReal dt, TimeReal dtWallClock)
+{
+	for (const ComponentPtr& c : mComponents.getAllItems())
+		c->updatePostDynamics(dt, dtWallClock);
 }
 
 void Entity::updateAttachments(TimeReal dt, TimeReal dtWallClock)

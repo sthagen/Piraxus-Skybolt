@@ -29,7 +29,7 @@ public:
 	~BulletDynamicBodyComponent() override;
 
 	void updatePreDynamics(TimeReal dt, TimeReal dtWallClock) override;
-	void updatePostDynamics() override;
+	void updatePostDynamics(TimeReal dt, TimeReal dtWallClock) override;
 
 	void setDynamicsEnabled(bool enabled) override;
 
@@ -55,6 +55,14 @@ public:
 	void applyTorque(const Vector3& torque) override;
 
 	void setCollisionsEnabled(bool enabled) override;
+
+	RigidBody* getRigidBody() const { return mBody; }
+
+public:
+	std::vector<std::type_index> getExposedTypes() const override
+	{
+		return {typeid(DynamicBodyComponent), typeid(BulletDynamicBodyComponent)};
+	}
 
 protected:
 	void setPosition(const Vector3& position);

@@ -5,6 +5,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "PlanetTileGeometry.h"
+#include "OsgGeometryHelpers.h"
 #include "SkyboltVis/OsgGeocentric.h"
 #include "SkyboltVis/OsgMathHelpers.h"
 #include <SkyboltCommon/Math/MathUtility.h>
@@ -15,14 +16,6 @@ using namespace skybolt;
 
 namespace skybolt {
 namespace vis {
-
-class BoundingBoxCallback : public osg::Drawable::ComputeBoundingBoxCallback
-{
-	osg::BoundingBox computeBound(const osg::Drawable & drawable)
-	{
-		return osg::BoundingBox(osg::Vec3f(-FLT_MAX, -FLT_MAX, 0), osg::Vec3f(FLT_MAX, FLT_MAX, 0));
-	}
-};
 
 osg::PrimitiveSet::Mode toOsgPrimitiveType(PrimitiveType type)
 {
@@ -56,6 +49,8 @@ osg::Geometry* createPlanetTileGeometry(const osg::Vec3d& tileCenter, const Box2
 	int innerMaxX = segmentCountX - 2;
 	int innerMaxY = segmentCountY - 2;
 
+	osg::BoundingBoxf bounds;
+
 	size_t i = 0;
 	for (int y = 0; y < countY; ++y)
 	{
@@ -69,9 +64,16 @@ osg::Geometry* createPlanetTileGeometry(const osg::Vec3d& tileCenter, const Box2
 			osg::Vec2d latLon = latLonBounds.getPointFromNormalizedCoord(math::vec2SwapComponents(uv));
 
 			double effectiveRadius = skirt ? (radius - double(skirtLength)) : radius;
-			posBuffer->at(i) = llaToGeocentric(latLon, 0, effectiveRadius) - tileCenter;
+			osg::Vec3f pos = llaToGeocentric(latLon, 0, effectiveRadius) - tileCenter;
+			posBuffer->at(i) = pos;
 			uvBuffer->at(i) = uv;
 			++i;
+
+			bounds.expandBy(pos);
+
+			// Ensure vertical bounds are large enough to account for height in heightmap
+			pos = llaToGeocentric(latLon, 0, radius + 9000) - tileCenter;
+			bounds.expandBy(pos);
 		}
 	}
 
@@ -79,10 +81,8 @@ osg::Geometry* createPlanetTileGeometry(const osg::Vec3d& tileCenter, const Box2
 
 	geometry->setVertexArray(posBuffer);
 	geometry->setTexCoordArray(0, uvBuffer);
-	geometry->setUseDisplayList(false);
-	geometry->setUseVertexBufferObjects(true);
-	geometry->setUseVertexArrayObject(true);
-	geometry->setComputeBoundingBoxCallback(osg::ref_ptr<BoundingBoxCallback>(new BoundingBoxCallback));
+	vis::configureDrawable(*geometry);
+	geometry->setComputeBoundingBoxCallback(createFixedBoundingBoxCallback(bounds));
 
 	geometry->addPrimitiveSet(new osg::DrawElementsUInt(toOsgPrimitiveType(type), indexBuffer->size(), (GLuint*)indexBuffer->getDataPointer()));
 	return geometry;
@@ -90,12 +90,11 @@ osg::Geometry* createPlanetTileGeometry(const osg::Vec3d& tileCenter, const Box2
 
 osg::Geode* createPlanetTileGeode(const osg::Vec3d& tileCenter, const Box2d& latLonBounds, double radius, PrimitiveType type)
 {
-	float skirtLength = 0.001 * radius;
+	float skirtLength = 0.0001 * radius;
 	osg::ref_ptr<osg::Geometry> geometry = createPlanetTileGeometry(tileCenter, latLonBounds, radius, skirtLength, type);
 
 	osg::Geode* geode = new osg::Geode;
 	geode->addDrawable(geometry);
-	geode->setCullingActive(false);
 
 	return geode;
 }

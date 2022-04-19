@@ -41,7 +41,6 @@ BulletDynamicBodyComponent::~BulletDynamicBodyComponent()
 void BulletDynamicBodyComponent::updatePreDynamics(TimeReal dt, TimeReal dtWallClock)
 {
 	mForces.clear();
-
 	// Reset position and orientation if the node was moved by an external source since the last timestep
 	auto newNodePosition = mNode->getPosition();
 	if (mNodePosition != newNodePosition)
@@ -56,7 +55,7 @@ void BulletDynamicBodyComponent::updatePreDynamics(TimeReal dt, TimeReal dtWallC
 	}
 }
 
-void BulletDynamicBodyComponent::updatePostDynamics()
+void BulletDynamicBodyComponent::updatePostDynamics(TimeReal dt, TimeReal dtWallClock)
 {
 	// Calculate new node position
 	btVector3 worldSpaceCenterOfMass = quatRotate(mBody->getOrientation(), mCenterOfMass);

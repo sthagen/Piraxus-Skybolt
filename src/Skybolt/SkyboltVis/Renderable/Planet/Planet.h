@@ -29,11 +29,18 @@
 namespace skybolt {
 namespace vis {
 
+struct ShadowParams
+{
+	int textureSize;
+	std::vector<float> cascadeBoundingDistances;
+};
+
 struct PlanetConfig
 {
 	px_sched::Scheduler* scheduler;
 	const ShaderPrograms* programs;
 	Scene* scene;
+	BuildingTypesPtr buildingTypes; //!< optional
 	sim::LatLon latLonOrigin;
 	float innerRadius;
 	PlanetTileSources planetTileSources;
@@ -43,12 +50,14 @@ struct PlanetConfig
 	int attributeMinLodLevel = 9;
 	int attributeMaxLodLevel = 9;
 	bool waterEnabled = true;
+	std::optional<ShadowParams> shadowParams;
 	osg::ref_ptr<osg::Texture2D> cloudsTexture; //!< Set to null to disable clouds
 	boost::optional<BruentonAtmosphereConfig> atmosphereConfig;
 	file::FileLocator fileLocator;
 	std::vector<file::Path> featureTreeFiles;
 	std::string featureTilesDirectoryRelAssetPackage;
 	std::optional<ForestParams> forestParams;
+	DetailMappingTechniquePtr detailMappingTechnique;
 };
 
 class MyPlanetSurfaceListener;
@@ -72,7 +81,8 @@ public:
 
 	//! If set, clouds will have uniform coverage across planet.
 	//! If not set, coverage will be governed by cloud texture.
-	void setCloudCoverageFraction(boost::optional<float> cloudCoverageFraction);
+	void setCloudCoverageFraction(std::optional<float> cloudCoverageFraction);
+	std::optional<float> getCloudCoverageFraction() const { return mCloudCoverageFraction; }
 
 	float getWaveHeight() const;
 
@@ -85,6 +95,8 @@ public:
 	}
 
 	float calcAtmosphericDensity(const osg::Vec3f& position) const;
+
+	double getInnerRadius() const { return mInnerRadius; }
 
 public:
 	// RootNode Implementation
@@ -121,7 +133,7 @@ private:
 	std::unique_ptr<PlanetFeatures> mPlanetFeatures;
 	std::unique_ptr<VolumeClouds> mVolumeClouds;
 	std::unique_ptr<class WaveFoamMaskGenerator> mWaveFoamMaskGenerator[WaterStateSetConfig::waveTextureCount];
-	std::unique_ptr<class ShadowMapGenerator> mShadowMapGenerator;
+	std::unique_ptr<class CascadedShadowMapGenerator> mShadowMapGenerator;
 	std::unique_ptr<class BruentonAtmosphere> mAtmosphere;
 
 	osg::Uniform* mPlanetCenterUniform;
@@ -129,15 +141,17 @@ private:
 
 	double mInnerRadius;
 	boost::optional<float> mAtmosphereScaleHeight;
+	osg::ref_ptr<osg::Group> mPlanetGroup;
 	osg::ref_ptr<osg::MatrixTransform> mTransform;
-	osg::ref_ptr<osg::MatrixTransform> mShadowSceneTransform;
+	osg::ref_ptr<osg::Group> mShadowSceneGroup;
+	osg::ref_ptr<osg::Group> mForestGroup; //!< Null if no forests
 	std::unique_ptr<MyPlanetSurfaceListener> mPlanetSurfaceListener;
 	double mJulianDate = 0;
 	osg::Uniform* mCloudDisplacementMetersUniform;
 	osg::Uniform* mCloudCoverageFractionUniform;
+	std::optional<float> mCloudCoverageFraction;
 
 	bool mCloudsVisible = false;
-	bool mShadowsEnabled = false; // disabled because shadows are experimental
 };
 
 } // namespace vis

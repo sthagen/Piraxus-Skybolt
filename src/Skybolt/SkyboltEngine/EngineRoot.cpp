@@ -10,6 +10,7 @@
 #include <SkyboltSim/System/EntitySystem.h>
 #include <SkyboltSim/World.h>
 #include <SkyboltVis/OsgStateSetHelpers.h>
+#include <SkyboltVis/TextureCache.h>
 #include <SkyboltVis/Renderable/Model/ModelFactory.h>
 #include <SkyboltVis/Renderable/Planet/Tile/TileSource/JsonTileSourceFactory.h>
 #include <SkyboltCommon/File/FileUtility.h>
@@ -19,8 +20,8 @@
 #include <px_sched/px_sched.h>
 
 #include <osgDB/Registry>
-
 #include <boost/log/trivial.hpp>
+#include <optional>
 
 namespace skybolt {
 
@@ -55,11 +56,49 @@ static vis::ModelFactoryPtr createModelFactory(const vis::ShaderPrograms& progra
 	{
 		config.stateSetModifiers[name] = [=](osg::StateSet& stateSet, const osg::Material& material) {
 			stateSet.setAttribute(glassProgram);
-			vis::makeStateSetTransparent(stateSet);
+			vis::makeStateSetTransparent(stateSet, vis::TransparencyMode::PremultipliedAlpha);
 		};
 	}
 
 	return std::make_shared<vis::ModelFactory>(config);
+}
+
+const std::string maxCoresEnvironmentVariable = "SKYBOLT_MAX_CORES";
+
+static std::optional<int> getMaxUsableCores()
+{
+	const char* value = std::getenv(maxCoresEnvironmentVariable.c_str());
+	if (value)
+	{
+		try
+		{
+			return std::stoi(value);
+		}
+		catch (const std::invalid_argument&)
+		{
+			BOOST_LOG_TRIVIAL(error) << maxCoresEnvironmentVariable << " environment variable set to '" << value << "' which is not a valid integer and will be ignored";
+		}
+	}
+	return std::nullopt;
+}
+
+static int determineThreadCountFromHardwareAndUserLimits()
+{
+	// Create coreCount threads - 1 background threads, leaving a core for the main thread.
+	int coreCount = std::thread::hardware_concurrency();
+
+	// Apply user configured limit to number of cores
+	std::optional<int> maxUsableCores = getMaxUsableCores();
+	std::string coreLimitMessage;
+	if (maxUsableCores)
+	{
+		coreCount = std::min(coreCount, *maxUsableCores);
+		coreLimitMessage = "Usable cores limited to environment variable " + maxCoresEnvironmentVariable + "=" + std::to_string(coreCount) + ".";
+	}
+
+	int threadCount = std::max(1, coreCount - 1);
+	BOOST_LOG_TRIVIAL(info) << coreCount << " CPU cores detected. " << coreLimitMessage << " Creating " << threadCount << " background threads.";
+	return threadCount;
 }
 
 EngineRoot::EngineRoot(const EngineRootConfig& config) :
@@ -69,11 +108,7 @@ EngineRoot::EngineRoot(const EngineRootConfig& config) :
 	simWorld(std::make_unique<sim::World>()),
 	namedObjectRegistry(std::make_shared<sim::NamedObjectRegistry>())
 {
-
-	// Create coreCount threads - 1 background threads, leaving a core for the main thread.
-	int coreCount = std::thread::hardware_concurrency();
-	int threadCount = std::max(1, coreCount-1);
-	BOOST_LOG_TRIVIAL(info) << coreCount << " CPU cores detected. Creating " << threadCount << " background threads.";
+	int threadCount = determineThreadCountFromHardwareAndUserLimits();
 
 	px_sched::SchedulerParams schedulerParams;
 	schedulerParams.max_running_threads = threadCount;
@@ -133,6 +168,9 @@ EngineRoot::EngineRoot(const EngineRootConfig& config) :
 	auto visFactoryRegistry = std::make_shared<vis::VisFactoryRegistry>();
 	vis::addDefaultFactories(*visFactoryRegistry);
 
+	tileSourceFactoryRegistry = std::make_shared<vis::JsonTileSourceFactoryRegistry>(config.tileSourceFactoryRegistryConfig);
+	vis::addDefaultFactories(*tileSourceFactoryRegistry);
+
 	// Create object factory
 	EntityFactory::Context context;
 	context.scheduler = scheduler.get();
@@ -144,10 +182,12 @@ EngineRoot::EngineRoot(const EngineRootConfig& config) :
 	context.namedObjectRegistry = namedObjectRegistry;
 	context.stats = &stats;
 	context.visFactoryRegistry = visFactoryRegistry;
-	context.tileSourceFactory = std::make_shared<vis::JsonTileSourceFactory>(config.tileSourceFactoryConfig);
+	context.tileSourceFactoryRegistry = tileSourceFactoryRegistry;
 	context.modelFactory = createModelFactory(programs);
 	context.fileLocator = locateFile;
 	context.assetPackagePaths = mAssetPackagePaths;
+	context.engineSettings = config.engineSettings;
+	context.textureCache = std::make_shared<vis::TextureCache>();
 
 	file::Paths paths = getFilesWithExtensionInDirectoryInAssetPackages(mAssetPackagePaths, "Entities", ".json");
 	entityFactory.reset(new EntityFactory(context, paths));

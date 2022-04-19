@@ -5,6 +5,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "OsgGeometryFactory.h"
+#include "OsgGeometryHelpers.h"
 #include <SkyboltCommon/Math/MathUtility.h>
 
 using namespace skybolt;
@@ -80,7 +81,6 @@ osg::Geometry* createSphere(float radius, unsigned int rings, unsigned int secto
 	osg::Geometry* sphereGeometry = new osg::Geometry;
 
 	osg::Vec3Array* sphereVertices = new osg::Vec3Array;
-	osg::Vec3Array* sphereNormals = new osg::Vec3Array;
 	osg::Vec2Array* sphereTexCoords = new osg::Vec2Array;
 
 	float const R = 1. / (float)(rings - 1);
@@ -101,8 +101,6 @@ osg::Geometry* createSphere(float radius, unsigned int rings, unsigned int secto
 			sphereVertices->push_back(osg::Vec3(x * radius,
 				y * radius,
 				z * radius));
-
-			sphereNormals->push_back(osg::Vec3(x, y, z));
 		}
 	}
 
@@ -151,9 +149,7 @@ osg::Geometry* createQuad(const BoundingBox2f& box, QuadUpDirection upDir)
 	}
 	quad->setVertexArray(verts);
 	quad->addPrimitiveSet(new osg::DrawArrays(osg::PrimitiveSet::TRIANGLE_STRIP, 0, 4));
-	quad->setUseDisplayList(false);
-	quad->setUseVertexBufferObjects(true);
-	quad->setUseVertexArrayObject(true);
+	configureDrawable(*quad);
 
 	return quad;
 }
@@ -188,11 +184,46 @@ osg::Geometry* createQuadWithUvs(const BoundingBox2f& box, QuadUpDirection upDir
 	quad->setTexCoordArray(0, uvs);
 
 	quad->addPrimitiveSet(new osg::DrawArrays(osg::PrimitiveSet::TRIANGLE_STRIP, 0, 4));
-	quad->setUseDisplayList(false);
-	quad->setUseVertexBufferObjects(true);
-	quad->setUseVertexArrayObject(true);
+	configureDrawable(*quad);
 
 	return quad;
+}
+
+osg::Geometry* createLineBox(const osg::BoundingBox& box)
+{
+	osg::Geometry* geometry = new osg::Geometry();
+
+	osg::Vec3Array* vertices = new osg::Vec3Array(8);
+	for (int i = 0; i < 8; ++i)
+	{
+		(*vertices)[i] = box.corner(i);
+	}
+
+	geometry->setVertexArray(vertices);
+
+	static GLushort indices[] = {
+		0,1,
+		0,4,
+		0,5,
+		1,5,
+
+		1,3,
+		3,7,
+		3,2,
+		2,6,
+
+		6,7,
+		4,5,
+		4,6,
+		5,7
+	};
+
+	// This time we simply use primitive, and hardwire the number 
+	// of coords to use since we know up front,
+	geometry->addPrimitiveSet(new osg::DrawElementsUShort(osg::PrimitiveSet::LINES, 24, indices));
+	configureDrawable(*geometry);
+
+	return geometry;
 }
 
 } // namespace vis

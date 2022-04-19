@@ -7,7 +7,7 @@
 #include "Terrain.h"
 #include "OsgGeocentric.h"
 #include "OsgGeometryFactory.h"
-#include "OsgImageHelpers.h"
+#include "OsgGeometryHelpers.h"
 #include "OsgStateSetHelpers.h"
 #include "PlanetTileGeometry.h"
 
@@ -26,30 +26,6 @@
 
 namespace skybolt {
 namespace vis {
-
-// Creates a 'textureizer map' which is a detail map that can be added
-// to a lower detail base map.
-// To produce a texturizer map, we take an original detail map, find the average,
-// subtract the average, and add 0.5 to all channels. The result is a map that contains
-// just the offsets to apply the original texture to a base map while preserving the average
-// color of the base map.
-// TODO: need to test this more to see if it is worth using. Currently unused.
-static void convertSrgbToTexturizerMap(osg::Image& image)
-{
-	osg::Vec4f averageLinearSpace = srgbToLinear(averageSrgbColor(image));
-
-	osg::Vec4f color;
-	size_t pixels = 0;
-	for (size_t t = 0; t < image.t(); ++t)
-	{
-		for (size_t s = 0; s < image.s(); ++s)
-		{
-			osg::Vec4f c = srgbToLinear(image.getColor(s, t));
-			c = c - averageLinearSpace + osg::Vec4f(0.5, 0.5, 0.5, 0.5);
-			image.setColor(linearToSrgb(c), s, t);
-		}
-	}
-}
 
 static void createPlaneBuffersWithUvs(osg::Vec3Array& posBuffer, osg::Vec2Array& uvBuffer, osg::UIntArray& indexBuffer, const osg::Vec2f& size, int segmentCountX, int segmentCountY)
 {
@@ -113,9 +89,7 @@ static osg::Node* createFlatTileGeode(const osg::Vec2f &size)
 
     geometry->setVertexArray(posBuffer);
 	geometry->setTexCoordArray(0, uvBuffer); 
-	geometry->setUseDisplayList(false); 
-    geometry->setUseVertexBufferObjects(true); 
-	geometry->setUseVertexArrayObject(true);
+	configureDrawable(*geometry);
 
     geometry->addPrimitiveSet(new osg::DrawElementsUInt(osg::PrimitiveSet::PATCHES, indexBuffer->size(), (GLuint*)indexBuffer->getDataPointer()));
     geode->addDrawable(geometry);
@@ -138,30 +112,36 @@ static void setupTerrainStateSet(osg::StateSet& ss, const TerrainConfig& config)
 	ss.setTextureAttributeAndModes(unit, config.overallAlbedoMap);
 	ss.addUniform(createUniformSampler2d("overallAlbedoSampler", unit++));
 
-	if (config.detailMaps)
+	if (config.attributeMap)
 	{
-		ss.setDefine("ENABLE_DETAIL_ALBEDO_TEXTURES");
-		const auto& detailMaps = *config.detailMaps;
-		{
-			ss.setTextureAttributeAndModes(unit, detailMaps.attributeMap);
-			ss.addUniform(createUniformSampler2d("attributeSampler", unit++));
-		}
+		ss.setTextureAttributeAndModes(unit, config.attributeMap);
+		ss.addUniform(createUniformSampler2d("attributeSampler", unit++));
+	}
 
-		osg::Uniform* uniform = new osg::Uniform(osg::Uniform::SAMPLER_2D, "albedoDetailSamplers", detailMaps.albedoDetailMaps.size());
+	if (auto uniformTechnique = dynamic_cast<const UniformDetailMappingTechnique*>(config.detailMappingTechnique.get()); uniformTechnique)
+	{
+		ss.setDefine("DETAIL_MAPPING_TECHNIQUE_UNIFORM");
+		ss.setDefine("DETAIL_SAMPLER_COUNT", 1);
+		
+		ss.setTextureAttributeAndModes(unit, uniformTechnique->albedoDetailMap);
+		ss.addUniform(createUniformSampler2d("albedoDetailSamplers", unit++));
+	}
+	else if (auto attributeTechnique = dynamic_cast<const AlbedoDerivedDetailMappingTechnique*>(config.detailMappingTechnique.get()); attributeTechnique)
+	{
+		ss.setDefine("DETAIL_MAPPING_TECHNIQUE_ALBEDO_DERIVED");
+		ss.setDefine("DETAIL_SAMPLER_COUNT", std::to_string(attributeTechnique->albedoDetailMaps.size()));
 
-		for (size_t i = 0; i < detailMaps.albedoDetailMaps.size(); ++i)
+		ss.setTextureAttributeAndModes(unit, attributeTechnique->noiseMap);
+		ss.addUniform(createUniformSampler2d("noiseSampler", unit++));
+
+		osg::Uniform* uniform = new osg::Uniform(osg::Uniform::SAMPLER_2D, "albedoDetailSamplers", attributeTechnique->albedoDetailMaps.size());
+		for (size_t i = 0; i < attributeTechnique->albedoDetailMaps.size(); ++i)
 		{
-			ss.setTextureAttributeAndModes(unit, detailMaps.albedoDetailMaps[i]);
+			ss.setTextureAttributeAndModes(unit, attributeTechnique->albedoDetailMaps[i]);
 			uniform->setElement(i, unit++);
 		}
 		ss.addUniform(uniform);
-
-		//ss.setTextureAttributeAndModes(unit, detailMaps.noiseMap);
-		//ss.addUniform(createUniformSampler2d("noiseSampler", unit++));
 	}
-
-	addShadowMapsToStateSet(config.shadowMaps, ss, unit);
-	unit += config.shadowMaps.size();
 
     osg::Uniform* heightScaleUniform = new osg::Uniform("heightScale", config.heightScale);
     ss.addUniform(heightScaleUniform);
@@ -177,6 +157,8 @@ static void setupTerrainStateSet(osg::StateSet& ss, const TerrainConfig& config)
 	ss.addUniform(new osg::Uniform("attributeMapUvScale", config.attributeMapUvScale));
 	ss.addUniform(new osg::Uniform("attributeMapUvOffset", config.attributeMapUvOffset));
 
+	ss.setDefine("ACCURATE_LOG_Z");
+
 #ifdef WIREFRAME
 	osg::PolygonMode * polygonMode = new osg::PolygonMode;
 	polygonMode->setMode( osg::PolygonMode::FRONT_AND_BACK, osg::PolygonMode::LINE );
@@ -184,15 +166,6 @@ static void setupTerrainStateSet(osg::StateSet& ss, const TerrainConfig& config)
 	ss.setAttributeAndModes( polygonMode, osg::StateAttribute::OVERRIDE | osg::StateAttribute::ON );
 #endif
 }
-
-class BoundingBoxCallback : public osg::Drawable::ComputeBoundingBoxCallback
-{
-	osg::BoundingBox computeBound(const osg::Drawable & drawable)
-	{
-		// TODO: use actual bounds
-		return osg::BoundingBox(osg::Vec3f(-FLT_MAX, -FLT_MAX, 0), osg::Vec3f(FLT_MAX, FLT_MAX, 0));
-	}
-};
 
 Terrain::Terrain(const TerrainConfig& config)
 {

@@ -7,9 +7,9 @@
 #pragma once
 
 #include "SkyboltVis/SkyboltVisFwd.h"
-#include "SkyboltVis/ShadowHelpers.h"
 #include "SkyboltVis/Renderable/Planet/Features/PlanetFeaturesSource.h"
 #include "SkyboltVis/Renderable/Water/LakesBatch.h"
+#include "SkyboltVis/Shadow/ShadowHelpers.h"
 
 #include <SkyboltCommon/File/FileLocator.h>
 #include <SkyboltCommon/Math/QuadTree.h>
@@ -37,9 +37,9 @@ struct PlanetFeaturesParams
 	std::string tilesDirectoryRelAssetPackage;
 	const ShaderPrograms* programs;
 	osg::ref_ptr<osg::StateSet> waterStateSet;
+	BuildingTypesPtr buildingTypes;
 	double planetRadius;
 	osg::Group* groups[featureGroupsSize];
-	ShadowMaps shadowMaps;
 };
 
 class PlanetFeatures

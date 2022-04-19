@@ -5,26 +5,21 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #version 440 core
-#pragma import_defines ( ENABLE_CLOUDS )
+#pragma import_defines ( CAST_SHADOWS )
 
-#include "DepthPrecision.h"
-#include "AtmosphericScattering.h"
+#include "AtmosphericScatteringWithClouds.h"
 #include "CloudShadows.h"
+#include "DepthPrecision.h"
 #include "Noise/FastRandom.h"
-#include "Shadows/Shadows.h"
 
 in vec4 osg_Vertex;
 in vec4 osg_Normal;
 in vec4 osg_MultiTexCoord0;
-
 out vec3 texCoord;
 out vec3 normalWS;
 out vec3 positionRelCamera;
+out AtmosphericScattering scattering;
 out float logZ;
-out vec3 sunIrradiance;
-out vec3 skyIrradiance;
-out vec3 transmittance;
-out vec3 skyRadianceToPoint;
 out vec3 colorMultiplier;
 out vec3 shadowTexCoord;
 
@@ -32,29 +27,31 @@ uniform mat4 osg_ModelViewProjectionMatrix;
 uniform mat4 modelMatrix;
 uniform vec3 cameraPosition;
 uniform vec3 lightDirection;
+uniform mat4 shadowProjectionMatrix0;
 
 uniform sampler2D cloudSampler;
 
 void main()
 {
 	gl_Position = osg_ModelViewProjectionMatrix * osg_Vertex;
-	texCoord = osg_MultiTexCoord0.xyz;
-	normalWS = mat3(modelMatrix) * osg_Normal.xyz;
+	
+#ifdef CAST_SHADOWS
+	return;
+#endif
 	
 	gl_Position.z = logarithmicZ_vertexShader(gl_Position.z, gl_Position.w, logZ);
 	
+	texCoord = osg_MultiTexCoord0.xyz;
+	normalWS = mat3(modelMatrix) * osg_Normal.xyz;	
+
 	vec4 positionWS = modelMatrix * osg_Vertex;
 	positionRelCamera = positionWS.xyz - cameraPosition;
 	
 	// Atmospheric scattering
 	vec3 positionRelPlanet = positionWS.xyz - planetCenter;
 	vec3 cameraPositionRelPlanet = cameraPosition - planetCenter;
-	skyRadianceToPoint = GetSkyRadianceToPoint(cameraPositionRelPlanet, positionRelPlanet, 0, lightDirection, transmittance);
-	sunIrradiance = GetSunAndSkyIrradiance(positionRelPlanet, lightDirection, skyIrradiance);
-	
-#ifdef ENABLE_CLOUDS
-	sunIrradiance *= sampleCloudShadowMaskAtPositionRelPlanet(cloudSampler, positionRelPlanet, lightDirection);
-#endif
-	shadowTexCoord = (shadowProjectionMatrix * positionWS).xyz;
+	scattering = calcAtmosphericScattering(cameraPositionRelPlanet, positionRelPlanet, lightDirection, cloudSampler);
+
+	shadowTexCoord = (shadowProjectionMatrix0 * positionWS).xyz;
 	colorMultiplier = vec3(0.6 + 0.5 * randomFast1d(osg_MultiTexCoord0.w));
 }

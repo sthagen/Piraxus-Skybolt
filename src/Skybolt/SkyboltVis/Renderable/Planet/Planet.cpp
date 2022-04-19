@@ -6,6 +6,7 @@
 
 #include "Planet.h"
 #include "SkyboltVis/GlobalSamplerUnit.h"
+#include "SkyboltVis/OsgImageHelpers.h"
 #include "SkyboltVis/OsgTextureHelpers.h"
 #include "SkyboltVis/RenderContext.h"
 #include "SkyboltVis/Camera.h"
@@ -20,15 +21,16 @@
 #include "SkyboltVis/Renderable/Planet/PlanetSurface.h"
 #include "SkyboltVis/Renderable/Planet/PlanetSky.h"
 #include "SkyboltVis/Renderable/Planet/Terrain.h"
+#include "SkyboltVis/Renderable/Planet/Tile/PlanetTileImagesLoader.h"
 #include "SkyboltVis/Renderable/Planet/Features/PlanetFeatures.h"
 #include "SkyboltVis/Renderable/Planet/Tile/OsgTileFactory.h"
+#include "SkyboltVis/Renderable/Planet/Tile/TileTextureCache.h"
 #include "SkyboltVis/Renderable/Billboard.h"
 #include "SkyboltVis/Renderable/Water/ReflectionCameraController.h"
 #include "SkyboltVis/Renderable/Water/Ocean.h"
 #include "SkyboltVis/Renderable/Water/WaveHeightTextureGenerator.h"
-
+#include "SkyboltVis/Shadow/CascadedShadowMapGenerator.h"
 #include "SkyboltVis/MatrixHelpers.h"
-#include "SkyboltVis/OsgImageHelpers.h"
 #include "SkyboltVis/OsgStateSetHelpers.h"
 
 #include <SkyboltSim/Physics/Astronomy.h>
@@ -39,6 +41,7 @@
 #include <osgDB/ReadFile>
 
 #include <future>
+#include <boost/log/trivial.hpp>
 
 using namespace skybolt::sim;
 
@@ -158,165 +161,6 @@ public:
 	}
 
 	Planet* mPlanet;
-};
-
-static void getOrthonormalBasis(const osg::Vec3 &normal, osg::Vec3 &tangent, osg::Vec3 &bitangent)
-{
-	float d = normal * osg::Vec3(0, 1, 0);
-	if (d > -0.95f && d < 0.95f)
-		bitangent = normal ^ osg::Vec3(0, 1, 0);
-	else
-		bitangent = normal ^ osg::Vec3(0, 0, 1);
-	bitangent.normalize();
-	tangent = bitangent ^ normal;
-}
-
-class LambdaDrawCallback : public osg::Camera::DrawCallback
-{
-public:
-	typedef std::function<void()> DrawFunction;
-	LambdaDrawCallback(const DrawFunction& drawFunction) : drawFunction(drawFunction) {}
-	void operator() (const osg::Camera &) const
-	{
-		drawFunction();
-	}
-
-	DrawFunction drawFunction;
-};
-
-class ShadowMapGenerator
-{
-public:
-	ShadowMapGenerator(osg::ref_ptr<osg::Program> shadowCasterProgram)
-	{
-		int textureWidth = 1024;
-		int textureHeight = 1024;
-
-		mTexture = createRenderTexture(textureWidth, textureHeight);
-
-		mTexture->setResizeNonPowerOfTwoHint(false);
-		mTexture->setInternalFormat(GL_DEPTH_COMPONENT);
-		mTexture->setTextureWidth(textureWidth);
-		mTexture->setTextureHeight(textureHeight);
-		mTexture->setFilter(osg::Texture2D::FilterParameter::MIN_FILTER, osg::Texture2D::FilterMode::NEAREST);
-		mTexture->setFilter(osg::Texture2D::FilterParameter::MAG_FILTER, osg::Texture2D::FilterMode::NEAREST);
-		mTexture->setNumMipmapLevels(0);
-		mTexture->setWrap(osg::Texture::WRAP_S, osg::Texture::CLAMP_TO_EDGE);
-		mTexture->setWrap(osg::Texture::WRAP_T, osg::Texture::CLAMP_TO_EDGE);
-
-		mCamera = new osg::Camera;
-		mCamera->setClearColor(osg::Vec4(1.0, 1.0, 1.0, 1.0));
-		mCamera->setClearMask(GL_DEPTH_BUFFER_BIT | GL_COLOR_BUFFER_BIT);
-		mCamera->setComputeNearFarMode(osg::Camera::DO_NOT_COMPUTE_NEAR_FAR);
-		mCamera->setViewport(0, 0, mTexture->getTextureWidth(), mTexture->getTextureHeight());
-		mCamera->setReferenceFrame(osg::Transform::ABSOLUTE_RF);
-		mCamera->setRenderOrder(osg::Camera::PRE_RENDER);
-		mCamera->setRenderTargetImplementation(osg::Camera::FRAME_BUFFER_OBJECT);
-		mCamera->attach(osg::Camera::DEPTH_BUFFER, mTexture);
-
-		float nearClip = 10;
-		float farClip = 10000;
-		mCamera->setProjectionMatrixAsOrtho(-mRadiusWorldSpace, mRadiusWorldSpace, -mRadiusWorldSpace, mRadiusWorldSpace, nearClip, farClip);
-
-		mCamera->setPreDrawCallback(new LambdaDrawCallback([this, shadowCasterProgram]() {
-			for (const osg::ref_ptr<osg::Group>& object : mShadowCasters)
-			{
-				object->getOrCreateStateSet()->setAttribute(shadowCasterProgram, osg::StateAttribute::OVERRIDE);
-			}
-		}));
-
-		mCamera->setPostDrawCallback(new LambdaDrawCallback([this, shadowCasterProgram]() {
-			for (const osg::ref_ptr<osg::Group>& object : mShadowCasters)
-			{
-				object->getOrCreateStateSet()->setAttribute(shadowCasterProgram, osg::StateAttribute::OFF);
-			}
-		}));
-
-		osg::StateSet* ss = mCamera->getOrCreateStateSet();
-
-		// Caster uniforms
-		mCameraPositionUniform = new osg::Uniform("cameraPosition", osg::Vec3f(0, 0, 0));
-		ss->addUniform(mCameraPositionUniform);
-
-		mViewMatrixUniform = new osg::Uniform("viewMatrix", osg::Matrixf());
-		ss->addUniform(mViewMatrixUniform);
-
-		mViewProjectionMatrixUniform = new osg::Uniform("viewProjectionMatrix", osg::Matrixf());
-		ss->addUniform(mViewProjectionMatrixUniform);
-
-		// Receiver uniforms
-		mShadowProjectionMatrixUniform = new osg::Uniform("shadowProjectionMatrix", osg::Matrixf());
-	}
-
-	void update(const Camera& viewCamera, const osg::Vec3& lightDirection, const osg::Vec3& wrappedNoiseOrigin)
-	{
-		osg::Vec3 shadowCameraPosition = viewCamera.getPosition();
-
-		osg::Vec3 tangent, bitangent;
-		getOrthonormalBasis(lightDirection, tangent, bitangent);
-		osg::Matrix m = makeMatrixFromTbn(tangent, bitangent, lightDirection);
-		m.setTrans(shadowCameraPosition);
-
-		osg::Matrix viewMatrix = osg::Matrix::inverse(m);
-
-		// Quantize view matrix to the nearest texel to avoid jittering artifacts
-		{
-			osg::Vec4 originInShadowSpace = osg::Vec4(wrappedNoiseOrigin, 1.0) * viewMatrix;
-			osg::Vec3 translation;
-
-			osg::Vec2f shadowWorldTexelSize(2.0f * mRadiusWorldSpace / (float)mTexture->getTextureWidth(), 2.0f * mRadiusWorldSpace / (float)mTexture->getTextureHeight());
-
-			translation.x() = std::floor(originInShadowSpace.x() / shadowWorldTexelSize.x()) * shadowWorldTexelSize.x() - originInShadowSpace.x();
-			translation.y() = std::floor(originInShadowSpace.y() / shadowWorldTexelSize.y()) * shadowWorldTexelSize.y() - originInShadowSpace.y();
-			translation.z() = 0.0;
-
-			viewMatrix.postMultTranslate(translation);
-		}
-
-		mCamera->setViewMatrix(viewMatrix);
-
-		mCameraPositionUniform->set(osg::Vec3f(shadowCameraPosition));
-
-		mViewMatrixUniform->set(mCamera->getViewMatrix());
-
-		osg::Matrixf viewProj = mCamera->getViewMatrix() * mCamera->getProjectionMatrix();
-		osg::Matrixf viewProjInv = osg::Matrix::inverse(viewProj);
-		mViewProjectionMatrixUniform->set(viewProj);
-
-		osg::Matrixf shadowMatrix(
-			0.5, 0.0, 0.0, 0.0,
-			0.0, 0.5, 0.0, 0.0,
-			0.0, 0.0, 0.5, 0.0,
-			0.5, 0.5, 0.5, 1.0
-		);
-
-		osg::Matrix shadowProjectionMatrix = viewProj * shadowMatrix;
-		mShadowProjectionMatrixUniform->set(shadowProjectionMatrix);
-	}
-
-	void configureShadowReceiverStateSet(osg::StateSet& ss)
-	{
-		ss.addUniform(mShadowProjectionMatrixUniform);
-	}
-
-	void registerShadowCaster(const osg::ref_ptr<osg::Group>& object)
-	{
-		mShadowCasters.push_back(object);
-	}
-
-	osg::ref_ptr<osg::Texture2D> getTexture() const { return mTexture; }
-	osg::ref_ptr<osg::Camera> getCamera() const { return mCamera; }
-
-private:
-	osg::ref_ptr<osg::Texture2D> mTexture;
-	osg::ref_ptr<osg::Camera> mCamera;
-	osg::ref_ptr<osg::Uniform> mCameraPositionUniform;
-	osg::ref_ptr<osg::Uniform> mViewMatrixUniform;
-	osg::ref_ptr<osg::Uniform> mViewProjectionMatrixUniform;
-	osg::ref_ptr<osg::Uniform> mShadowProjectionMatrixUniform;
-	float mRadiusWorldSpace = 10000;
-
-	std::vector<osg::ref_ptr<osg::Group>> mShadowCasters;
 };
 
 class CascadedWaveHeightTextureGenerator
@@ -477,42 +321,85 @@ private:
 	double mPrevTimeSeconds = 0;
 };
 
-// Creates a 'textureizer map' which is a detail map that can be added
-// to a lower detail base map.
-// To produce a texturizer map, we take an original detail map, find the average,
-// subtract the average, and add 0.5 to all channels. The result is a map that contains
-// just the offsets to apply the original texture to a base map while preserving the average
-// color of the base map.
-// TODO: need to test this more to see if it is worth using. Currently unused.
-static void convertSrgbToTexturizerMap(osg::Image& image)
+static osg::ref_ptr<osg::Texture2D> createNonSrgbTextureWithoutMipmaps(const osg::ref_ptr<osg::Image>& image)
 {
-	float alphaRejectionThreshold = -1.0; // don't reject alpha
-	osg::Vec4f averageLinearSpace = srgbToLinear(averageSrgbColor(image, alphaRejectionThreshold));
-
-	osg::Vec4f color;
-	size_t pixels = 0;
-	for (size_t t = 0; t < image.t(); ++t)
-	{
-		for (size_t s = 0; s < image.s(); ++s)
-		{
-			osg::Vec4f originalColor = image.getColor(s, t);
-			osg::Vec4f c = srgbToLinear(originalColor);
-			c = c - averageLinearSpace + osg::Vec4f(0.5, 0.5, 0.5, 0.5);
-			c = linearToSrgb(c);
-			c.a() = originalColor.a(); // perserve alpha
-			image.setColor(c, s, t);
-		}
-	}
+	osg::ref_ptr<osg::Texture2D> texture = new osg::Texture2D(image);
+	texture->setWrap(osg::Texture::WRAP_S, osg::Texture::CLAMP_TO_EDGE);
+	texture->setWrap(osg::Texture::WRAP_T, osg::Texture::CLAMP_TO_EDGE);
+	texture->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR);
+	texture->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
+	return texture;
 }
 
+static osg::ref_ptr<osg::Texture2D> createSrgbTexture(const osg::ref_ptr<osg::Image>& image)
+{
+	osg::ref_ptr<osg::Texture2D> texture = new osg::Texture2D(image);
+	texture->setInternalFormat(toSrgbInternalFormat(texture->getInternalFormat()));
+	texture->setWrap(osg::Texture::WRAP_S, osg::Texture::CLAMP_TO_EDGE);
+	texture->setWrap(osg::Texture::WRAP_T, osg::Texture::CLAMP_TO_EDGE);
+	texture->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR_MIPMAP_LINEAR);
+	texture->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
+	texture->setMaxAnisotropy(8);
+	return texture;
+}
+
+static OsgTileFactory::TileTextures createSurfaceTileTextures(TileTextureCache& cache, const PlanetTileImages& images)
+{
+	// We create some of these textures with mip-mapping disabled when it's not needed.
+	// Generating mipmaps is expensive and we need tile textures to load as quickly as possible.
+	OsgTileFactory::TileTextures textures;
+	textures.height.texture = cache.getOrCreateTexture(TileTextureCache::TextureType::Height, images.heightMapImage.image, createNonSrgbTextureWithoutMipmaps);
+	textures.height.key = images.heightMapImage.key;
+	textures.normal = cache.getOrCreateTexture(TileTextureCache::TextureType::Normal, images.normalMapImage, createNonSrgbTextureWithoutMipmaps);
+	textures.landMask = cache.getOrCreateTexture(TileTextureCache::TextureType::LandMask, images.landMaskImage, createNonSrgbTextureWithoutMipmaps);
+	textures.albedo.texture = cache.getOrCreateTexture(TileTextureCache::TextureType::Albedo, images.albedoMapImage.image, createSrgbTexture);
+	textures.albedo.key = images.albedoMapImage.key;
+
+	if (images.attributeMapImage)
+	{
+		TileTexture attribute;
+		attribute.texture = cache.getOrCreateTexture(TileTextureCache::TextureType::Attribute, images.attributeMapImage->image, createNonSrgbTextureWithoutMipmaps);
+		attribute.key = images.attributeMapImage->key;
+		textures.attribute = attribute;
+	}
+	return textures;
+}
+
+static GpuForestTileTextures createGpuForestTileTextures(TileTextureCache& cache, const PlanetTileImages& images)
+{
+	GpuForestTileTextures textures;
+	textures.height.texture = cache.getOrCreateTexture(TileTextureCache::TextureType::Height, images.heightMapImage.image, createNonSrgbTextureWithoutMipmaps);
+	textures.height.key = images.heightMapImage.key;
+	textures.attribute.texture = cache.getOrCreateTexture(TileTextureCache::TextureType::Attribute, images.attributeMapImage->image, createNonSrgbTextureWithoutMipmaps);
+	textures.attribute.key = images.attributeMapImage->key;
+	return textures;
+}
+
+using TileTextureCachePtr = std::shared_ptr<TileTextureCache>;
+static std::function<OsgTileFactory::TileTextures(const PlanetTileImages&)> createSurfaceTileTexturesProvider(const TileTextureCachePtr& cache)
+{
+	return [cache] (const PlanetTileImages& images) {
+		return createSurfaceTileTextures(*cache, images);
+	};
+}
+
+static std::function<GpuForestTileTextures(const TileImages&)> createGpuForestTileTexturesProvider(const TileTextureCachePtr& cache)
+{
+	return [cache] (const TileImages& images) {
+		return createGpuForestTileTextures(*cache, static_cast<const PlanetTileImages&>(images));
+	};
+}
 
 Planet::Planet(const PlanetConfig& config) :
 	mScene(config.scene),
 	mInnerRadius(config.innerRadius),
+	mPlanetGroup(new osg::Group),
 	mTransform(new osg::MatrixTransform),
-	mShadowSceneTransform(new osg::MatrixTransform),
+	mShadowSceneGroup(new osg::Group),
 	mPlanetSurfaceListener(new MyPlanetSurfaceListener(this))
 {
+	mPlanetGroup->addChild(mTransform);
+
 	if (config.atmosphereConfig)
 	{
 		mAtmosphereScaleHeight = config.atmosphereConfig->rayleighScaleHeight;
@@ -552,7 +439,13 @@ Planet::Planet(const PlanetConfig& config) :
 	mEnvironmentMapGpuTextureGenerator = new GpuTextureGenerator(environmentTexture, createSkyToEnvironmentMapStateSet(config.programs->getRequiredProgram("skyToEnvironmentMap")), /* generateMipMaps */ true);
 	addTextureGeneratorToSceneGraph(mEnvironmentMapGpuTextureGenerator);
 
-	mShadowMapGenerator = std::make_unique<ShadowMapGenerator>(config.programs->getRequiredProgram("shadowCaster"));
+	{
+		osg::StateSet* ss = mScene->_getGroup()->getOrCreateStateSet();
+		ss->setTextureAttributeAndModes((int)GlobalSamplerUnit::EnvironmentProbe, environmentTexture, osg::StateAttribute::ON);
+		ss->addUniform(createUniformSampler2d("environmentSampler", (int)GlobalSamplerUnit::EnvironmentProbe));
+	}
+
+	auto textureCache = std::make_shared<TileTextureCache>();
 
 	// Create terrain
 	{
@@ -560,22 +453,27 @@ Planet::Planet(const PlanetConfig& config) :
 		{
 			OsgTileFactoryConfig factoryConfig;
 			factoryConfig.programs = config.programs;
-			factoryConfig.shadowMaps = {mShadowMapGenerator->getTexture()};
 			factoryConfig.planetRadius = mInnerRadius;
 			factoryConfig.hasCloudShadows = config.cloudsTexture != nullptr;
+			factoryConfig.detailMappingTechnique = config.detailMappingTechnique;
 			osgTileFactory = std::make_shared<OsgTileFactory>(factoryConfig);
 		}
 
 		GpuForestPtr forest;
 		if (config.forestParams)
 		{
+			mForestGroup = new osg::Group();
+
 			vis::GpuForestConfig forestConfig;
 			forestConfig.forestParams = *config.forestParams;
-			forestConfig.parentGroup = config.scene->_getGroup();
+			forestConfig.parentGroup = mForestGroup;
 			forestConfig.parentTransform = mTransform;
 			forestConfig.planetRadius = mInnerRadius;
+			forestConfig.tileTexturesProvider = createGpuForestTileTexturesProvider(textureCache);
 			forestConfig.programs = config.programs;
 			forest = std::make_shared<vis::GpuForest>(forestConfig);
+
+			mPlanetGroup->addChild(mForestGroup);
 		}
 
 		PlanetSurfaceConfig surfaceConfig;
@@ -592,6 +490,7 @@ Planet::Planet(const PlanetConfig& config) :
 		surfaceConfig.albedoMaxLodLevel = config.albedoMaxLodLevel;
 		surfaceConfig.attributeMinLodLevel = config.attributeMinLodLevel;
 		surfaceConfig.attributeMaxLodLevel = config.attributeMaxLodLevel;
+		surfaceConfig.tileTexturesProvider = createSurfaceTileTexturesProvider(textureCache);
 
 		mPlanetSurface.reset(new PlanetSurface(surfaceConfig));
 	}
@@ -603,7 +502,6 @@ Planet::Planet(const PlanetConfig& config) :
 		if (it != config.visFactoryRegistry->end())
 		{
 			WaterStateSetConfig stateSetConfig;
-			stateSetConfig.environmentTexture = environmentTexture;
 
 			float smallestWaveHeightMapWorldSize = 500.0f; // FIXME: To avoid texture wrapping issues, Scene::mWrappedNoisePeriod divided by this should have no remainder
 			mWaveHeightTextureGenerator.reset(new CascadedWaveHeightTextureGenerator(static_cast<const WaveHeightTextureGeneratorFactory&>(*it->second), smallestWaveHeightMapWorldSize));
@@ -660,8 +558,8 @@ Planet::Planet(const PlanetConfig& config) :
 			osg::Vec2f pos(0.2, 0.7);
 			osg::Vec2f size(0.3, 0.3);
 			BoundingBox2f box(pos, pos + size);
-			ScreenQuad* quad = new ScreenQuad(createTexturedQuadStateSet(config.programs->hudGeometry, environmentTexture), box);
-			mScene->addObject(quad);
+			ScreenQuad* quad = new ScreenQuad(createTexturedQuadStateSet(config.programs->getRequiredProgram("hudGeometry"), environmentTexture), box);
+			mScene->addObject(quad); // TODO: we should add these debug textures to the hud group instead of the scene so they're rendered after tonemapping
 #endif
 
 //#define ATMOSPHERIC_SCATTERING_DEBUG_VIZ
@@ -669,7 +567,7 @@ Planet::Planet(const PlanetConfig& config) :
 			osg::Vec2f pos(0.2, 0.7);
 			osg::Vec2f size(0.3, 0.3);
 			BoundingBox2f box(pos, pos + size);
-			ScreenQuad* quad = new ScreenQuad(createTexturedQuadStateSet(config.programs->hudGeometry, mAtmosphere->getTransmittanceTexture()), box);
+			ScreenQuad* quad = new ScreenQuad(createTexturedQuadStateSet(config.programs->getRequiredProgram("hudGeometry"), mAtmosphere->getTransmittanceTexture()), box);
 			mScene->addObject(quad);
 #endif
 
@@ -679,34 +577,39 @@ Planet::Planet(const PlanetConfig& config) :
 		}
 	}
 
-	osg::ref_ptr<osg::Group> nonBuildingsGroup = new osg::Group();
-	mTransform->addChild(nonBuildingsGroup);
+	osg::ref_ptr<osg::Group> nonBuildingFeaturesGroup = new osg::Group();
+	mTransform->addChild(nonBuildingFeaturesGroup);
 
 	osg::ref_ptr<osg::Group> buildingsGroup = new osg::Group();
 	mTransform->addChild(buildingsGroup);
-
-	mShadowMapGenerator->registerShadowCaster(buildingsGroup);
 
 	// Features
 	if (mWaterStateSet)
 	{
 		if (!config.featureTreeFiles.empty())
 		{
-			PlanetFeaturesParams params;
-			params.scheduler = config.scheduler;
-			params.treeFiles = config.featureTreeFiles;
-			params.fileLocator = config.fileLocator;
-			params.tilesDirectoryRelAssetPackage = config.featureTilesDirectoryRelAssetPackage;
-			params.programs = config.programs;
-			params.waterStateSet = mWaterStateSet;
-			params.planetRadius = mInnerRadius;
-			params.shadowMaps = { mShadowMapGenerator->getTexture() };
+			if (config.buildingTypes)
+			{
+				PlanetFeaturesParams params;
+				params.scheduler = config.scheduler;
+				params.treeFiles = config.featureTreeFiles;
+				params.fileLocator = config.fileLocator;
+				params.tilesDirectoryRelAssetPackage = config.featureTilesDirectoryRelAssetPackage;
+				params.programs = config.programs;
+				params.waterStateSet = mWaterStateSet;
+				params.buildingTypes = config.buildingTypes;
+				params.planetRadius = mInnerRadius;
 
-			params.groups[PlanetFeaturesParams::groupsBuildingsIndex] = buildingsGroup;
-			params.groups[PlanetFeaturesParams::groupsNonBuildingsIndex] = nonBuildingsGroup;
-			mPlanetFeatures.reset(new PlanetFeatures(params));
-			
-			mPlanetSurface->Listenable<PlanetSurfaceListener>::addListener(mPlanetSurfaceListener.get());
+				params.groups[PlanetFeaturesParams::groupsBuildingsIndex] = buildingsGroup;
+				params.groups[PlanetFeaturesParams::groupsNonBuildingsIndex] = nonBuildingFeaturesGroup;
+				mPlanetFeatures.reset(new PlanetFeatures(params));
+
+				mPlanetSurface->Listenable<PlanetSurfaceListener>::addListener(mPlanetSurfaceListener.get());
+			}
+			else
+			{
+				BOOST_LOG_TRIVIAL(error) << "Building types not defined";
+			}
 		}
 	}
 
@@ -722,7 +625,7 @@ Planet::Planet(const PlanetConfig& config) :
 		mVolumeClouds.reset(new VolumeClouds(cloudsConfig));
 
 		setCloudsVisible(true);
-		setCloudCoverageFraction(boost::none);
+		setCloudCoverageFraction(std::nullopt);
 
 		osg::StateSet* ss = mScene->_getGroup()->getOrCreateStateSet();
 		ss->setTextureAttributeAndModes((int)GlobalSamplerUnit::GlobalCloudAlpha, config.cloudsTexture);
@@ -732,8 +635,8 @@ Planet::Planet(const PlanetConfig& config) :
 			osg::ref_ptr<osg::Texture> texture = new osg::Texture2D(osgDB::readImageFile("Environment/Noise.png"));
 			texture->setWrap(osg::Texture::WRAP_S, osg::Texture::REPEAT);
 			texture->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
-			ss->setTextureAttributeAndModes((int)GlobalSamplerUnit::ShadowCascade0, texture);
-			ss->addUniform(createUniformSampler2d("coverageDetailSampler2", (int)GlobalSamplerUnit::ShadowCascade0));
+			ss->setTextureAttributeAndModes((int)GlobalSamplerUnit::CloudDetail2d, texture);
+			ss->addUniform(createUniformSampler2d("coverageDetailSampler2", (int)GlobalSamplerUnit::CloudDetail2d));
 		}
 
 //#define CLOUDS_TEXTURE
@@ -747,28 +650,39 @@ Planet::Planet(const PlanetConfig& config) :
 	}
 
 	// Shadows
-	if (mShadowsEnabled)
+	if (config.shadowParams)
 	{
+		CascadedShadowMapGeneratorConfig c;
+		c.cascadeBoundingDistances = config.shadowParams->cascadeBoundingDistances;
+		c.textureSize = config.shadowParams->textureSize;
+		mShadowMapGenerator = std::make_unique<CascadedShadowMapGenerator>(c);
+
 		{
 			osg::StateSet* ss = mScene->_getGroup()->getOrCreateStateSet();
 			ss->setDefine("ENABLE_SHADOWS");
 		}
 
-		mShadowSceneTransform->addChild(buildingsGroup);
-		mShadowMapGenerator->getCamera()->addChild(mShadowSceneTransform);
-		mScene->_getGroup()->addChild(mShadowMapGenerator->getCamera());
+		mShadowSceneGroup->getOrCreateStateSet()->setDefine("CAST_SHADOWS");
 
-		if (0) // debug shadows
+		mShadowSceneGroup->addChild(mScene->_getGroup());
+		for (int i = 0; i < mShadowMapGenerator->getCascadeCount(); ++i)
+		{
+			mShadowMapGenerator->getCamera(i)->addChild(mShadowSceneGroup);
+			mScene->_getGroup()->getParent(0)->addChild(mShadowMapGenerator->getCamera(i));
+		}
+
+		if (false) // debug shadows
 		{
 			osg::Vec2f pos(0.2, 0.7);
 			osg::Vec2f size(0.3, 0.3);
 			BoundingBox2f box(pos, pos + size);
-			ScreenQuad* quad = new ScreenQuad(createTexturedQuadStateSet(config.programs->getRequiredProgram("hudGeometry"), mShadowMapGenerator->getTexture()), box);
+			ScreenQuad* quad = new ScreenQuad(createTexturedQuadStateSet(config.programs->getRequiredProgram("hudGeometry"), mShadowMapGenerator->getTextures()[0]), box);
 			mScene->addObject(quad);
 		}
 
-		osg::StateSet* ss = mTransform->getOrCreateStateSet();
+		osg::StateSet* ss = mScene->_getGroup()->getOrCreateStateSet();
 		mShadowMapGenerator->configureShadowReceiverStateSet(*ss);
+		addShadowMapsToStateSet(mShadowMapGenerator->getTextures(), *ss, int(GlobalSamplerUnit::ShadowCascade0));
 	}
 }
 
@@ -776,7 +690,10 @@ Planet::~Planet()
 {
 	if (mShadowMapGenerator)
 	{
-		mScene->_getGroup()->removeChild(mShadowMapGenerator->getCamera());
+		for (int i = 0; i < mShadowMapGenerator->getCascadeCount(); ++i)
+		{
+			mScene->_getGroup()->removeChild(mShadowMapGenerator->getCamera(i));
+		}
 	}
 
 	removeTextureGeneratorFromSceneGraph(mEnvironmentMapGpuTextureGenerator);
@@ -798,6 +715,11 @@ Planet::~Planet()
 	if (mPlanetSky)
 	{
 		mScene->removeObject(mPlanetSky.get());
+	}
+
+	if (mForestGroup)
+	{
+		mScene->_getGroup()->removeChild(mForestGroup);
 	}
 
 	setCloudsVisible(false);
@@ -822,8 +744,9 @@ void Planet::setCloudsVisible(bool visible)
 	mCloudsVisible = visible;
 }
 
-void Planet::setCloudCoverageFraction(boost::optional<float> cloudCoverageFraction)
+void Planet::setCloudCoverageFraction(std::optional<float> cloudCoverageFraction)
 {
+	mCloudCoverageFraction = cloudCoverageFraction;
 	osg::StateSet* ss = mScene->_getGroup()->getOrCreateStateSet();
 	if (cloudCoverageFraction)
 	{
@@ -865,7 +788,7 @@ void Planet::setOrientation(const osg::Quat &orientation)
 
 osg::Node* Planet::_getNode() const
 {
-	return mTransform.get();
+	return mPlanetGroup.get();
 }
 
 void Planet::addTextureGeneratorToSceneGraph(const osg::ref_ptr<GpuTextureGenerator>& generator)
@@ -905,9 +828,8 @@ void Planet::updatePostSceneUpdate()
 
 void Planet::updatePreRender(const RenderContext& context)
 {
-	if (mShadowMapGenerator && mShadowsEnabled)
+	if (mShadowMapGenerator)
 	{
-		mShadowSceneTransform->setMatrix(mTransform->getMatrix());
 		mShadowMapGenerator->update(context.camera, context.lightDirection, mScene->getWrappedNoiseOrigin());
 	}
 

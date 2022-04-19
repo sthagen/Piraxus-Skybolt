@@ -5,19 +5,12 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "VisHud.h"
+#include <SkyboltVis/OsgGeometryHelpers.h>
 
 #include <osg/Geode>
 #include <osgText/Text>
 
 namespace skybolt {
-
-class BoundingBoxCallback : public osg::Drawable::ComputeBoundingBoxCallback
-{
-	osg::BoundingBox computeBound(const osg::Drawable & drawable)
-	{
-		return osg::BoundingBox(osg::Vec3f(-FLT_MAX, -FLT_MAX, -FLT_MAX), osg::Vec3f(FLT_MAX, FLT_MAX, FLT_MAX));
-	}
-};
 
 class TextPool
 {
@@ -52,7 +45,7 @@ public:
 			text->setUseDisplayList(false);
 			text->setUseVertexBufferObjects(true);
 			text->setUseVertexArrayObject(true);
-			text->setComputeBoundingBoxCallback(osg::ref_ptr<BoundingBoxCallback>(new BoundingBoxCallback));
+			text->setCullingActive(false);
 		}
 
 		if (mUsedTexts.size() < mMaxSize)
@@ -100,9 +93,10 @@ static const char *passThroughVertSource = {
 static const char *hudFragSource = {
 	"#version 330 \n"
 	"out vec4 color;\n"
+	"uniform vec4 foregroundColor;\n"
 	"void main(void)\n"
 	"{\n"
-	"    color = vec4 (0.0, 1.0, 0.0, 1.0);\n"
+	"    color = foregroundColor;\n"
 	"}\n"
 };
 
@@ -111,10 +105,11 @@ static const char *maskedHudFragSource = {
 	"in vec4 texCoord;\n"
 	"out vec4 color;\n"
 	"uniform sampler2D glyphTexture;\n"
+	"uniform vec4 foregroundColor;\n"
 	"void main(void)\n"
 	"{\n"
 	"    float alpha = texture(glyphTexture, texCoord.xy).a;\n"
-	"    color = vec4 (0.0, 1.0, 0.0, alpha);\n"
+	"    color = vec4(1.0, 1.0, 1.0, alpha) * foregroundColor;\n"
 	"}\n"
 };
 
@@ -161,10 +156,16 @@ VisHud::VisHud() :
 		ss->setMode(GL_CULL_FACE, osg::StateAttribute::OFF | osg::StateAttribute::OVERRIDE);
 	}
 
+	osg::ref_ptr<osg::Group> group = new osg::Group();
+	group->addChild(mPrimitivesGeode);
+	group->addChild(mTextGeode);
+
+	mColorUniform = osg::ref_ptr<osg::Uniform>(new osg::Uniform("foregroundColor", osg::Vec4f(1, 1, 1, 1)));
+	group->getOrCreateStateSet()->addUniform(mColorUniform);
+
 	mTextPool.reset(new TextPool());
 	
-	mCamera->addChild(mPrimitivesGeode);
-	mCamera->addChild(mTextGeode);
+	mCamera->addChild(group);
 	addChild(mCamera);
 
 	clear();
@@ -192,10 +193,8 @@ void VisHud::traverse(osg::NodeVisitor& visitor)
 			osg::Geometry* geom = new osg::Geometry;
 			geom->setVertexArray(mLineVertices);
 			geom->addPrimitiveSet(new osg::DrawArrays(GL_LINES, 0, mLineVertices->size()));
-			geom->setUseDisplayList(false);
-			geom->setUseVertexBufferObjects(true);
-			geom->setUseVertexArrayObject(true);
-			geom->setComputeBoundingBoxCallback(osg::ref_ptr<BoundingBoxCallback>(new BoundingBoxCallback));
+			vis::configureDrawable(*geom);
+			geom->setCullingActive(false);
 			mPrimitivesGeode->addDrawable(geom);
 		}
 
@@ -204,10 +203,8 @@ void VisHud::traverse(osg::NodeVisitor& visitor)
 			osg::Geometry* geom = new osg::Geometry;
 			geom->setVertexArray(mQuadVertices);
 			geom->addPrimitiveSet(new osg::DrawArrays(GL_QUADS, 0, mQuadVertices->size()));
-			geom->setUseDisplayList(false);
-			geom->setUseVertexBufferObjects(true);
-			geom->setUseVertexArrayObject(true);
-			geom->setComputeBoundingBoxCallback(osg::ref_ptr<BoundingBoxCallback>(new BoundingBoxCallback));
+			vis::configureDrawable(*geom);
+			geom->setCullingActive(false);
 			mPrimitivesGeode->addDrawable(geom);
 		}
 	}
@@ -222,6 +219,11 @@ void VisHud::clear()
 	mTextGeode->removeDrawables(0, mTextGeode->getNumDrawables());
 
 	setDirty();
+}
+
+void VisHud::setColor(const osg::Vec4f& color)
+{
+	mColorUniform->set(color);
 }
 
 void VisHud::setDirty()
@@ -283,6 +285,7 @@ void VisHud::drawText(const glm::vec2 &p, const std::string &message, float rota
     text->setPosition(toVec3(p));
 	text->setCharacterSize(size < 0.0 ? 0.03 : size);
 	text->setRotation(osg::Quat(rotation, osg::Vec3f(0,0,1)));
+	text->setLineSpacing(0.25);
 
     mTextGeode->addDrawable(text);
 

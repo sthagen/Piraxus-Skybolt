@@ -5,6 +5,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "RunwaysBatch.h"
+#include "OsgGeometryHelpers.h"
 #include "OsgImageHelpers.h"
 #include "OsgStateSetHelpers.h"
 
@@ -27,15 +28,6 @@ using namespace skybolt;
 
 namespace skybolt {
 namespace vis {
-
-class BoundingBoxCallback : public osg::Drawable::ComputeBoundingBoxCallback
-{
-	osg::BoundingBox computeBound(const osg::Drawable & drawable)
-	{
-		// TODO: use real bounds
-		return osg::BoundingBox(osg::Vec3f(-FLT_MAX, -FLT_MAX, 0), osg::Vec3f(FLT_MAX, FLT_MAX, 0));
-	}
-};
 
 static osg::Vec3f toVec3(const osg::Vec2f& v, float z)
 {
@@ -88,12 +80,10 @@ static osg::Geometry* createGeometry(const MeshBuffers& buffers)
 	geometry->setNormalArray(buffers.normal);
 	geometry->setNormalBinding(osg::Geometry::BIND_PER_VERTEX);
 	geometry->setTexCoordArray(0, buffers.uv);
-	geometry->setUseDisplayList(false);
-	geometry->setUseVertexBufferObjects(true);
-	geometry->setUseVertexArrayObject(true);
+	configureDrawable(*geometry);
 
 	geometry->addPrimitiveSet(new osg::DrawElementsUInt(osg::PrimitiveSet::TRIANGLES, buffers.index->size(), (GLuint*)buffers.index->getDataPointer()));
-	geometry->setComputeBoundingBoxCallback(osg::ref_ptr<BoundingBoxCallback>(new BoundingBoxCallback));
+	geometry->setComputeBoundingBoxCallback(createFixedBoundingBoxCallback(osg::BoundingBox())); // TODO: set bounds
 	return geometry;
 }
 

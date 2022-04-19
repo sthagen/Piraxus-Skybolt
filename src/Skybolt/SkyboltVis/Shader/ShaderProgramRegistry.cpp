@@ -44,11 +44,15 @@ static ShaderProgramSourceFilesRegistry createShaderProgramSourceFilesRegistry()
 		}},
 		{ "model", {
 			{ osg::Shader::VERTEX, "Shaders/SimpleTextured.vert" },
-			{ osg::Shader::FRAGMENT, "Shaders/SimpleTexturedLambert.frag" }
+			{ osg::Shader::FRAGMENT, "Shaders/PrincipledBrdf.frag" }
 		}},
 		{ "modelText", {
 			{ osg::Shader::VERTEX, "Shaders/SimpleTextured.vert" },
 			{ osg::Shader::FRAGMENT, "Shaders/SimpleTexturedLambertText.frag" }
+		}},
+		{ "road", {
+			{ osg::Shader::VERTEX, "Shaders/SimpleTextured.vert" },
+			{ osg::Shader::FRAGMENT, "Shaders/Road.frag" }
 		}},
 		{ "heightToNormal", {
 			{ osg::Shader::VERTEX, "Shaders/ScreenQuad.vert" },
@@ -103,8 +107,12 @@ static ShaderProgramSourceFilesRegistry createShaderProgramSourceFilesRegistry()
 			{ osg::Shader::FRAGMENT, "Shaders/TreeBillboard.frag" }
 		}},
 		{ "lake", {
-			{ osg::Shader::VERTEX, "Shaders/Planet.vert" },
-			{ osg::Shader::FRAGMENT, "Shaders/Planet.frag" }
+			{ osg::Shader::VERTEX, "Shaders/OceanStatic.vert" },
+			{ osg::Shader::FRAGMENT, "Shaders/Ocean.frag" }
+		}},
+		{ "particles", {
+			{ osg::Shader::VERTEX, "Shaders/Particles.vert" },
+			{ osg::Shader::FRAGMENT, "Shaders/Particles.frag" }
 		}},
 		{ "planet", {
 			{ osg::Shader::VERTEX, "Shaders/Planet.vert" },
@@ -121,6 +129,10 @@ static ShaderProgramSourceFilesRegistry createShaderProgramSourceFilesRegistry()
 		{ "unlitColored", {
 			{ osg::Shader::VERTEX, "Shaders/SimpleColor.vert" },
 			{ osg::Shader::FRAGMENT, "Shaders/SimpleColor.frag" }
+		}},
+		{"unlitTextured", {
+			{ osg::Shader::VERTEX, "Shaders/SimpleTextured.vert" },
+			{ osg::Shader::FRAGMENT, "Shaders/SimpleTextured.frag" }
 		}},
 		{ "volumeClouds", {
 			{ osg::Shader::VERTEX, "Shaders/VolumeClouds.vert" },

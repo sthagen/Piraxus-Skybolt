@@ -10,7 +10,6 @@
 #include "SkyboltVis/SkyboltVisFwd.h"
 #include "SkyboltVis/OsgBox2.h"
 #include "SkyboltVis/VisObject.h"
-#include "SkyboltVis/ShadowHelpers.h"
 #include "SkyboltVis/Renderable/Forest/GpuForest.h"
 #include "SkyboltVis/Renderable/Planet/Tile/OsgTileFactory.h"
 #include "SkyboltVis/Renderable/Planet/Tile/QuadTreeTileLoader.h"
@@ -45,6 +44,7 @@ struct PlanetSurfaceConfig
 	float radius; //!< Radius of planet surface
 	osg::ref_ptr<osg::Texture2D> cloudsTexture; //!< Set to null to disable clouds
 
+	std::function<OsgTileFactory::TileTextures(const struct PlanetTileImages&)> tileTexturesProvider;
 	std::shared_ptr<OsgTileFactory> osgTileFactory;
 
 	GpuForestPtr gpuForest; //!< Can be null
@@ -70,21 +70,20 @@ public:
 	PlanetSurface(const PlanetSurfaceConfig& config);
 	~PlanetSurface();
 
-	const PlanetTileSources& getPlanetTileSources() const { return mPlanetTileSources; }
-
 	void updatePreRender(const RenderContext& context);
 
 	skybolt::Listenable<QuadTreeTileLoaderListener>* getTileLoaderListenable() const { return mTileSource.get(); }
 
-private:
-	void updateGeometry();
-	OsgTileFactory::TileTextures createTileTextures(const struct PlanetTileImages& images);
+	const osg::ref_ptr<osg::Group>& getGroup() const { return mGroup; }
 
 private:
-	PlanetTileSources mPlanetTileSources;
+	void updateGeometry();
+
+private:
 	float mRadius;
 
 	std::unique_ptr<class QuadTreeTileLoader> mTileSource;
+	std::function<OsgTileFactory::TileTextures(const struct PlanetTileImages&)> mTileTexturesProvider;
 	std::shared_ptr<OsgTileFactory> mOsgTileFactory;
 	std::shared_ptr<struct PlanetSubdivisionPredicate> mPredicate;
 	GpuForestPtr mGpuForest;
@@ -92,9 +91,9 @@ private:
 	osg::ref_ptr<osg::MatrixTransform> mParentTransform;
 	osg::ref_ptr<osg::Group> mGroup;
 
+	TileKeyImagesMap mLeafTileImages;
 	typedef std::map<skybolt::QuadTreeTileKey, OsgTile> TileNodeMap;
 	TileNodeMap mTileNodes;
-	std::unique_ptr<class TileTextureCache> mTextureCache;
 };
 
 } // namespace vis

@@ -5,14 +5,18 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "ModelPreparer.h"
+#include <SkyboltVis/OsgGeometryHelpers.h>
+
 #include <osg/Geode>
 #include <osg/Geometry>
+#include <osgUtil/TangentSpaceGenerator>
 
 namespace skybolt {
 namespace vis {
 
-ModelPreparer::ModelPreparer() :
-	NodeVisitor(NodeVisitor::TRAVERSE_ALL_CHILDREN)
+ModelPreparer::ModelPreparer(const ModelPreparerConfig& config) :
+	NodeVisitor(NodeVisitor::TRAVERSE_ALL_CHILDREN),
+	mGenerateTangents(config.generateTangents)
 {
 }
  
@@ -29,9 +33,14 @@ void ModelPreparer::apply(osg::Geode &geode)
 		osg::Geometry *geom = geode.getDrawable(geodeIdx)->asGeometry();
 		if (geom)
 		{
-			geom->setUseDisplayList(false); 
-			geom->setUseVertexBufferObjects(true); 
-			geom->setUseVertexArrayObject(true);
+			vis::configureDrawable(*geom);
+
+			if (mGenerateTangents)
+			{
+				osg::ref_ptr<osgUtil::TangentSpaceGenerator> tsg = new osgUtil::TangentSpaceGenerator();
+				tsg->generate(geom, 0);
+				geom->setTexCoordArray(1, tsg->getTangentArray());
+			}
 		} 
 	}
 }    

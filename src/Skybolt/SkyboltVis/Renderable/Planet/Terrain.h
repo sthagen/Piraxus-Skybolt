@@ -8,13 +8,37 @@
 
 #include "SkyboltVis/DefaultRootNode.h"
 #include "SkyboltVis/OsgBox2.h"
-#include "SkyboltVis/ShadowHelpers.h"
+#include "SkyboltVis/SkyboltVisFwd.h"
+#include "SkyboltVis/Shadow/ShadowHelpers.h"
 #include <osg/Texture2D>
 
 #include <boost/optional.hpp>
 
 namespace skybolt {
 namespace vis {
+
+struct DetailMappingTechnique
+{
+public:
+	virtual ~DetailMappingTechnique() = default;
+};
+
+//! One detail map applied uniformly over the terrain
+struct UniformDetailMappingTechnique : DetailMappingTechnique
+{
+	~UniformDetailMappingTechnique() override = default;
+
+	osg::ref_ptr<osg::Texture2D> albedoDetailMap;
+};
+
+//! Multiple detail maps blended by coverage derived from albedo map
+struct AlbedoDerivedDetailMappingTechnique : DetailMappingTechnique
+{
+	~AlbedoDerivedDetailMappingTechnique() override = default;
+
+	osg::ref_ptr<osg::Texture2D> noiseMap;
+	std::vector<osg::ref_ptr<osg::Texture2D>> albedoDetailMaps;
+};
 
 struct TerrainConfig
 {
@@ -38,19 +62,13 @@ struct TerrainConfig
 
 	std::shared_ptr<Tile> tile;
 
-	struct DetailMaps
-	{
-		osg::ref_ptr<osg::Texture2D> attributeMap;
-		std::vector<osg::ref_ptr<osg::Texture2D>> albedoDetailMaps;
-	};
-
 	osg::ref_ptr<osg::Texture2D> heightMap;
 	osg::ref_ptr<osg::Texture2D> normalMap;
 	osg::ref_ptr<osg::Texture2D> overallAlbedoMap;
+	osg::ref_ptr<osg::Texture2D> attributeMap;
 
-	boost::optional<DetailMaps> detailMaps;
+	DetailMappingTechniquePtr detailMappingTechnique; //!< May be null
 
-	ShadowMaps shadowMaps;
 	osg::ref_ptr<osg::Program> program;
 	float heightScale = 65536;
 	osg::Vec2f heightMapUvScale = osg::Vec2f(1, 1);

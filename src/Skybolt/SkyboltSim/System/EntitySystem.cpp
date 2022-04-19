@@ -49,6 +49,8 @@ void EntitySystem::updatePreDynamicsSubstep(double dtSubstep)
 				Vector3 force = mWorld->calcGravity(*position, body->getMass());
 				body->applyCentralForce(force);
 			}
+
+			entity->updatePostDynamicsSubstep(dtSubstep);
 		}
 	}
 }
@@ -59,7 +61,7 @@ void EntitySystem::updatePostDynamics(const System::StepArgs& args)
 	{
 		if (entity->isDynamicsEnabled())
 		{
-			entity->updatePostDynamics();
+			entity->updatePostDynamics(args.dtSim, args.dtWallClock);
 		}
 	}
 	for (const EntityPtr& entity : mEntities)

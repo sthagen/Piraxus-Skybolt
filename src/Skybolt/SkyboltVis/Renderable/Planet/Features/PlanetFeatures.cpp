@@ -37,12 +37,13 @@ struct LoadedVisObjects
 class VisObjectsLoadTask
 {
 public:
-	VisObjectsLoadTask(const ShaderPrograms* programs, const osg::ref_ptr<osg::StateSet>& waterStateSet, const ShadowMaps& shadowMaps) :
+	VisObjectsLoadTask(const ShaderPrograms* programs, const osg::ref_ptr<osg::StateSet>& waterStateSet, const BuildingTypesPtr& buildingTypes) :
 		mPrograms(programs),
 		mWaterStateSet(waterStateSet),
-		mShadowMaps(shadowMaps)
+		mBuildingTypes(buildingTypes)
 	{
 		assert(mPrograms);
+		assert(mBuildingTypes);
 	}
 
 	//! May be called on multiple threads concurrently
@@ -77,6 +78,15 @@ public:
 				}
 				road.width = srcRoad.width;
 				road.laneCount = srcRoad.laneCount;
+				
+				for (int i = 0; i < 2; ++i)
+				{
+					road.endLaneCounts[i] = srcRoad.endLaneCounts[i];
+					if (road.endLaneCounts[i] != -1)
+					{
+						road.endControlPoints[i] = converter.latLonAltToCartesianNed(srcRoad.endControlPoints[i]);
+					}
+				}
 				roads.push_back(road);
 			}
 			break;
@@ -149,7 +159,7 @@ public:
 		// Create roads
 		if (!roads.empty())
 		{
-			RoadsBatchPtr visRoads(new RoadsBatch(roads, modelProgram));
+			RoadsBatchPtr visRoads(new RoadsBatch(roads, mPrograms->getRequiredProgram("road")));
 			objects.nodes[PlanetFeaturesParams::groupsNonBuildingsIndex].push_back(visRoads);
 		}
 
@@ -171,7 +181,7 @@ public:
 		// Create batches for rendering
 		if (!buildings.empty())
 		{
-			BuildingsBatchPtr visBuildings(new BuildingsBatch(buildings, mPrograms->getRequiredProgram("building"), mShadowMaps));
+			BuildingsBatchPtr visBuildings(new BuildingsBatch(buildings, mPrograms->getRequiredProgram("building"), mBuildingTypes));
 			objects.nodes[PlanetFeaturesParams::groupsBuildingsIndex].push_back(visBuildings);
 		}
 
@@ -194,7 +204,7 @@ private:
 	std::shared_mutex* mElevationProviderMutex;
 	const ShaderPrograms* mPrograms;
 	osg::ref_ptr<osg::StateSet> mWaterStateSet;
-	ShadowMaps mShadowMaps;
+	BuildingTypesPtr mBuildingTypes;
 };
 
 std::unique_ptr<FeatureTile> createTile(const QuadTreeTileKey& key, const LatLonBounds& bounds)
@@ -207,7 +217,7 @@ std::unique_ptr<FeatureTile> createTile(const QuadTreeTileKey& key, const LatLon
 
 PlanetFeatures::PlanetFeatures(const PlanetFeaturesParams& params) :
 	mScheduler(params.scheduler),
-	mVisObjectsLoadTask(new VisObjectsLoadTask(params.programs, params.waterStateSet, params.shadowMaps)),
+	mVisObjectsLoadTask(new VisObjectsLoadTask(params.programs, params.waterStateSet, params.buildingTypes)),
 	mPlanetRadius(params.planetRadius),
 	mFileLocator(params.fileLocator),
 	mTilesDirectoryRelAssetPackage(params.tilesDirectoryRelAssetPackage),

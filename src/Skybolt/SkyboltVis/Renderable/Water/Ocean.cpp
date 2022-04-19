@@ -9,6 +9,7 @@
 #include "SkyboltVis/Camera.h"
 #include "SkyboltVis/Scene.h"
 #include "SkyboltVis/OsgGeometryFactory.h"
+#include "SkyboltVis/OsgGeometryHelpers.h"
 #include "SkyboltVis/RenderContext.h"
 
 #include <osg/CullFace>
@@ -21,14 +22,6 @@
 #endif
 
 using namespace skybolt::vis;
-
-class BoundingBoxCallback : public osg::Drawable::ComputeBoundingBoxCallback
-{
-	osg::BoundingBox computeBound(const osg::Drawable & drawable)
-	{
-		return osg::BoundingBox(osg::Vec3f(-FLT_MAX, -FLT_MAX, 0), osg::Vec3f(FLT_MAX, FLT_MAX, 0));
-	}
-};
 
 osg::Node* createPlane(const osg::Vec2f &size)
 {
@@ -44,10 +37,8 @@ osg::Node* createPlane(const osg::Vec2f &size)
     osg::Geometry *geometry = new osg::Geometry();
 
     geometry->setVertexArray(posBuffer);
-	geometry->setUseDisplayList(false); 
-    geometry->setUseVertexBufferObjects(true); 
-	geometry->setUseVertexArrayObject(true);
-	geometry->setComputeBoundingBoxCallback(osg::ref_ptr<BoundingBoxCallback>(new BoundingBoxCallback));
+	configureDrawable(*geometry);
+	geometry->setCullingActive(false);
 
     geometry->addPrimitiveSet(new osg::DrawElementsUInt(osg::PrimitiveSet::TRIANGLES, indexBuffer->size(), (GLuint*)indexBuffer->getDataPointer()));
     geode->addDrawable(geometry);

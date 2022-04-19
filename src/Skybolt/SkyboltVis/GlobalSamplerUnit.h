@@ -14,7 +14,12 @@ enum class GlobalSamplerUnit
 	Scattering,
 	Irradiance,
 	GlobalCloudAlpha,
-	ShadowCascade0
+	ShadowCascade0,
+	ShadowCascade1,
+	ShadowCascade2,
+	ShadowCascade3,
+	CloudDetail2d,
+	EnvironmentProbe
 };
 
 } // namespace skybolt

@@ -5,6 +5,7 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "LakesBatch.h"
+#include "SkyboltVis/OsgGeometryHelpers.h"
 #include "SkyboltVis/OsgImageHelpers.h"
 #include "SkyboltVis/OsgStateSetHelpers.h"
 #include "SkyboltVis/Camera.h"
@@ -15,7 +16,7 @@
 
 #include "SkyboltVis/earcutOsg.h"
 
-float lakeHeightAboveTerrain = 10.0f;
+float lakeHeightAboveTerrain = 0.01f;
 
 //#define WIREFRAME
 #ifdef WIREFRAME
@@ -24,15 +25,6 @@ float lakeHeightAboveTerrain = 10.0f;
 
 namespace skybolt {
 namespace vis {
-
-class BoundingBoxCallback : public osg::Drawable::ComputeBoundingBoxCallback
-{
-	osg::BoundingBox computeBound(const osg::Drawable & drawable)
-	{
-		// TODO: Use actual bounds
-		return osg::BoundingBox(osg::Vec3f(-FLT_MAX, -FLT_MAX, 0), osg::Vec3f(FLT_MAX, FLT_MAX, 0));
-	}
-};
 
 void createLake(const Lake& lake, osg::Vec3Array* posBuffer, osg::Vec3Array* normalBuffer, osg::Vec2Array* uvBuffer, osg::UIntArray* indexBuffer)
 {
@@ -103,13 +95,11 @@ osg::Geode* createLakes(const Lakes& lakes)
 	geometry->setNormalBinding(osg::Geometry::BIND_PER_VERTEX);
 
 	geometry->setTexCoordArray(0, uvBuffer);
-	geometry->setUseDisplayList(false);
-	geometry->setUseVertexBufferObjects(true);
-	geometry->setUseVertexArrayObject(true);
+	configureDrawable(*geometry);
 
 	geometry->addPrimitiveSet(new osg::DrawElementsUInt(osg::PrimitiveSet::TRIANGLES, indexBuffer->size(), (GLuint*)indexBuffer->getDataPointer()));
 
-	geometry->setComputeBoundingBoxCallback(osg::ref_ptr<BoundingBoxCallback>(new BoundingBoxCallback));
+	geometry->setCullingActive(false); // TODO: set bounds and enable culling
 	geode->addDrawable(geometry);
 	return geode;
 }
@@ -121,7 +111,7 @@ osg::ref_ptr<osg::StateSet> createStateSet(const osg::ref_ptr<osg::Program>& pro
 	ss->setAttributeAndModes(program, osg::StateAttribute::ON);
 	ss->addUniform(uniforms.modelMatrix);
 
-	ss->addUniform(new osg::Uniform("depthOffset", -0.001f));
+	ss->addUniform(new osg::Uniform("depthOffset", -0.0005f));
 	ss->setDefine("ENABLE_DEPTH_OFFSET");
 	ss->setDefine("ACCURATE_LOG_Z"); // enabled because geometry is sparsely tessellated
 

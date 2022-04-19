@@ -23,8 +23,7 @@ namespace vis {
 
 OsgTileFactory::OsgTileFactory(const OsgTileFactoryConfig& config) :
 	mPrograms(config.programs),
-	mShadowMaps(config.shadowMaps),
-	mAlbedoDetailMaps(config.albedoDetailMaps),
+	mDetailMappingTechnique(config.detailMappingTechnique),
 	mPlanetRadius(config.planetRadius),
 	mHasCloudShadows(config.hasCloudShadows)
 {
@@ -75,6 +74,7 @@ OsgTile OsgTileFactory::createOsgTile(const QuadTreeTileKey& key, const Box2d& l
 		config.heightMap = textures.height.texture;
 		config.normalMap = textures.normal;
 		config.overallAlbedoMap = textures.albedo.texture;
+		config.attributeMap = textures.attribute ? textures.attribute->texture : nullptr;
 
 		config.heightMapUvScale = heightImageScale;
 		config.heightMapUvOffset = heightImageOffset;
@@ -82,14 +82,7 @@ OsgTile OsgTileFactory::createOsgTile(const QuadTreeTileKey& key, const Box2d& l
 		config.overallAlbedoMapUvOffset = albedoImageOffset;
 		config.attributeMapUvScale = attributeImageScale;
 		config.attributeMapUvOffset = attributeImageOffset;
-		config.shadowMaps = mShadowMaps;
-
-		if (!mAlbedoDetailMaps.empty() && textures.attribute)
-		{
-			config.detailMaps = TerrainConfig::DetailMaps();
-			config.detailMaps->attributeMap = textures.attribute->texture;
-			config.detailMaps->albedoDetailMaps = mAlbedoDetailMaps;
-		}
+		config.detailMappingTechnique = mDetailMappingTechnique;
 
 		result.highResTerrain.reset(new Terrain(config));
 		result.transform->addChild(result.highResTerrain->getTerrainNode());

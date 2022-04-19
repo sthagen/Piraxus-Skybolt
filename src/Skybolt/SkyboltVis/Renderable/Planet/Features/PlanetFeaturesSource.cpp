@@ -156,6 +156,10 @@ void Road::load(std::ifstream& f)
 {
 	readValue(f, width);
 	readValue(f, laneCount);
+	readValue(f, endControlPoints[0]);
+	readValue(f, endControlPoints[1]);
+	readValue(f, endLaneCounts[0]);
+	readValue(f, endLaneCounts[1]);
 	PolyFeature::load(f);
 }
 
@@ -163,6 +167,10 @@ void Road::save(std::ofstream& f) const
 {
 	writeValue(f, width);
 	writeValue(f, laneCount);
+	writeValue(f, endControlPoints[0]);
+	writeValue(f, endControlPoints[1]);
+	writeValue(f, endLaneCounts[0]);
+	writeValue(f, endLaneCounts[1]);
 	PolyFeature::save(f);
 }
 
@@ -412,7 +420,7 @@ static void addJsonTilesToTreeRecursive(FeatureTile& tile, WorldFeatures::QuadTr
 	tile.key.level = j["level"];
 	tile.key.x = j["x"];
 	tile.key.y = j["y"];
-	tile.featureCountInFile += j["featureCount"];
+	tile.featureCountInFile += size_t(j["featureCount"]);
 	
 	auto it = j.find("children");
 	if (it != j.end())
