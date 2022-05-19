@@ -67,6 +67,7 @@
 #include <SkyboltVis/RenderTarget/Viewport.h>
 #include <SkyboltVis/Shader/ShaderSourceFileChangeMonitor.h>
 #include <SkyboltVis/Window/CaptureScreenshot.h>
+#include <SkyboltVis/Window/DisplaySettings.h>
 #include <SkyboltVis/Window/Window.h>
 #include <SkyboltCommon/File/OsDirectories.h>
 #include <SkyboltCommon/Json/ReadJsonFile.h>
@@ -331,7 +332,7 @@ MainWindow::MainWindow(const std::vector<PluginFactory>& enginePluginFactories, 
 	mEngineRoot = EngineRootFactory::create(enginePluginFactories, mEngineSettings);
 	mSimStepper = std::make_unique<SimStepper>(mEngineRoot->systemRegistry);
 
-	mOsgWidget = new OsgWidget();
+	mOsgWidget = new OsgWidget(getDisplaySettingsFromEngineSettings(mEngineSettings), this);
 	mRenderTarget = vis::createAndAddViewportToWindow(*mOsgWidget->getWindow(), mEngineRoot->programs.getRequiredProgram("compositeFinal"));
 	mRenderTarget->setScene(std::make_shared<vis::RenderTargetSceneAdapter>(mEngineRoot->scene));
 
@@ -653,12 +654,12 @@ void MainWindow::updateIfIntervalElapsed()
 
 static bool isNamedEntityWithPosition(const Entity& entity)
 {
-	return getPosition(entity).is_initialized() && entity.getFirstComponent<TemplateNameComponent>() != nullptr;
+	return getPosition(entity).has_value() && entity.getFirstComponent<TemplateNameComponent>() != nullptr;
 }
 
 static bool isPlanet(const Entity& entity)
 {
-	return getPosition(entity).is_initialized() && entity.getFirstComponent<PlanetComponent>() != nullptr;
+	return getPosition(entity).has_value() && entity.getFirstComponent<PlanetComponent>() != nullptr;
 }
 
 class CameraControllerWidget : public QWidget

@@ -10,6 +10,7 @@
 #include "SkyboltSim/SkyboltSimFwd.h"
 #include <SkyboltCommon/Range.h>
 
+#include <functional>
 #include <memory>
 #include <optional>
 #include <vector>
@@ -47,8 +48,8 @@ public:
 		float emissionRate;
 		float radius;
 		Vector3 upDirection;
-		DoubleRange speed;
-		DoubleRange elevationAngle;
+		DoubleRangeInclusive speed;
+		DoubleRangeInclusive elevationAngle;
 		std::shared_ptr<Random> random;
 	};
 
@@ -102,13 +103,15 @@ public:
 		float radiusLinearGrowthPerSecond;
 		float lifetime;
 		float atmosphericSlowdownFactor;
+		std::function<sim::Entity*(const sim::Vector3& position)> nearestPlanetProvider;
 	};
 
-	ParticleIntegrator(const Params& params) : mParams(params) {}
+	ParticleIntegrator(const Params& params);
 	void update(float dt, std::vector<Particle>& particles) override;
 
 private:
 	Params mParams;
+	std::optional<glm::dmat4> mPrevPlanetTransform;
 };
 
 class ParticleSystem

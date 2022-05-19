@@ -432,6 +432,8 @@ Planet::Planet(const PlanetConfig& config) :
 
 		mCloudCoverageFractionUniform = new osg::Uniform("cloudCoverageFraction", 0.5f);
 		ss->addUniform(mCloudCoverageFractionUniform);
+
+		ss->addUniform(new osg::Uniform("solar_irradiance", BruentonAtmosphere::getSolarIrradiance()));
 	}
 
 	// Create sky environment sphere
@@ -486,10 +488,6 @@ Planet::Planet(const PlanetConfig& config) :
 		surfaceConfig.planetTileSources = config.planetTileSources;
 		surfaceConfig.oceanEnabled = config.waterEnabled;
 		surfaceConfig.cloudsTexture = config.cloudsTexture;
-		surfaceConfig.elevationMaxLodLevel = config.elevationMaxLodLevel;
-		surfaceConfig.albedoMaxLodLevel = config.albedoMaxLodLevel;
-		surfaceConfig.attributeMinLodLevel = config.attributeMinLodLevel;
-		surfaceConfig.attributeMaxLodLevel = config.attributeMaxLodLevel;
 		surfaceConfig.tileTexturesProvider = createSurfaceTileTexturesProvider(textureCache);
 
 		mPlanetSurface.reset(new PlanetSurface(surfaceConfig));
@@ -730,16 +728,19 @@ Planet::~Planet()
 
 void Planet::setCloudsVisible(bool visible)
 {
-	osg::StateSet* ss = mScene->_getGroup()->getOrCreateStateSet();
-	if (visible && !mCloudsVisible)
+	if (mVolumeClouds)
 	{
-		mScene->addObject(mVolumeClouds.get());
-		ss->setDefine("ENABLE_CLOUDS");
-	}
-	else if (!visible && mCloudsVisible)
-	{
-		mScene->removeObject(mVolumeClouds.get());
-		ss->removeDefine("ENABLE_CLOUDS");
+		osg::StateSet* ss = mScene->_getGroup()->getOrCreateStateSet();
+		if (visible && !mCloudsVisible)
+		{
+			mScene->addObject(mVolumeClouds.get());
+			ss->setDefine("ENABLE_CLOUDS");
+		}
+		else if (!visible && mCloudsVisible)
+		{
+			mScene->removeObject(mVolumeClouds.get());
+			ss->removeDefine("ENABLE_CLOUDS");
+		}
 	}
 	mCloudsVisible = visible;
 }

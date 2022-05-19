@@ -6,7 +6,7 @@ if(${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.19.0")
 endif()
 
 project(Skybolt)
-set(PACKAGE_VERSION 1.1.0)
+set(PACKAGE_VERSION 1.3.0)
 
 enable_testing()
 
@@ -63,6 +63,11 @@ endif()
 OPTION(Boost_STATIC_LIBS "Boost use static libs")
 if (Boost_STATIC_LIBS)
 	set(Boost_USE_STATIC_LIBS ON)
+endif()
+
+OPTION(OSG_STATIC_LIBS "OSG use static libs")
+if (OSG_STATIC_LIBS)
+	add_definitions(-DOSG_LIBRARY_STATIC)
 endif()
 
 #-------------------------------------------------------------

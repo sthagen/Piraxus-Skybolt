@@ -45,10 +45,6 @@ struct PlanetConfig
 	float innerRadius;
 	PlanetTileSources planetTileSources;
 	VisFactoryRegistry* visFactoryRegistry;
-	int elevationMaxLodLevel = 1;
-	int albedoMaxLodLevel = 1;
-	int attributeMinLodLevel = 9;
-	int attributeMaxLodLevel = 9;
 	bool waterEnabled = true;
 	std::optional<ShadowParams> shadowParams;
 	osg::ref_ptr<osg::Texture2D> cloudsTexture; //!< Set to null to disable clouds
@@ -100,11 +96,13 @@ public:
 
 public:
 	// RootNode Implementation
-	void setPosition(const osg::Vec3d &position) override;
-	void setOrientation(const osg::Quat &orientation) override;
+	void setPosition(const osg::Vec3d& position) override;
+	void setOrientation(const osg::Quat& orientation) override;
+	void setTransform(const osg::Matrix& m) override  { mTransform->setMatrix(m); }
 
 	osg::Vec3d getPosition() const override { return mTransform->getMatrix().getTrans(); }
 	osg::Quat getOrientation() const override { return mTransform->getMatrix().getRotate(); }
+	osg::Matrix getTransform() const override  { return mTransform->getMatrix(); }
 
 	osg::Node* _getNode() const override;
 

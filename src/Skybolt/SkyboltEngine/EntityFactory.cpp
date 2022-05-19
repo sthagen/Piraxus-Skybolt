@@ -21,6 +21,7 @@
 
 #include <SkyboltSim/JsonHelpers.h>
 #include <SkyboltSim/World.h>
+#include <SkyboltSim/WorldUtil.h>
 #include <SkyboltSim/Components/DynamicBodyComponent.h>
 #include <SkyboltSim/Components/CameraComponent.h>
 #include <SkyboltSim/Components/MainRotorComponent.h>
@@ -38,6 +39,7 @@
 #include <SkyboltVis/OsgImageHelpers.h>
 #include <SkyboltVis/OsgStateSetHelpers.h>
 #include <SkyboltVis/OsgTextureHelpers.h>
+#include <SkyboltVis/RenderBinHelpers.h>
 #include <SkyboltVis/TextureCache.h>
 #include <SkyboltVis/Scene.h>
 #include <SkyboltVis/ElevationProvider/TilePlanetAltitudeProvider.h>
@@ -256,20 +258,23 @@ static void loadParticleSystem(Entity* entity, const EntityFactory::Context& con
 	emitterParams.emissionRate = json.at("emissionRate");
 	emitterParams.radius = json.at("radius");
 	emitterParams.positionable = entity->getFirstComponentRequired<Node>();
-	emitterParams.elevationAngle = DoubleRange(json.at("elevationAngleMin"), json.at("elevationAngleMax"));
-	emitterParams.speed = DoubleRange(json.at("speedMin"), json.at("speedMax"));
+	emitterParams.elevationAngle = DoubleRangeInclusive(json.at("elevationAngleMin"), json.at("elevationAngleMax"));
+	emitterParams.speed = DoubleRangeInclusive(json.at("speedMin"), json.at("speedMax"));
 	emitterParams.upDirection = readVector3(json.at("upDirection"));
 	emitterParams.random = std::make_shared<Random>(/* seed */ 0);
 
 	double lifetime = json.at("lifetime");
 
-	ParticleIntegrator::Params lifetimeParams;
-	lifetimeParams.lifetime = lifetime;
-	lifetimeParams.radiusLinearGrowthPerSecond = json.at("radiusLinearGrowthPerSecond");
-	lifetimeParams.atmosphericSlowdownFactor = json.at("atmosphericSlowdownFactor");
+	ParticleIntegrator::Params integratorParams;
+	integratorParams.lifetime = lifetime;
+	integratorParams.radiusLinearGrowthPerSecond = json.at("radiusLinearGrowthPerSecond");
+	integratorParams.atmosphericSlowdownFactor = json.at("atmosphericSlowdownFactor");
+	integratorParams.nearestPlanetProvider = [world = context.simWorld] (const Vector3& position) {
+		return findNearestEntityWithComponent<sim::PlanetComponent>(world->getEntities(), position);
+	};
 
 	auto particleSystem = std::make_shared<ParticleSystem>(ParticleSystem::Operations({
-		std::make_shared<ParticleIntegrator>(lifetimeParams), // integrate before emission ensure new particles emitted at end of time step
+		std::make_shared<ParticleIntegrator>(integratorParams), // integrate before emission ensure new particles emitted at end of time step
 		std::make_shared<ParticleEmitter>(emitterParams),
 		std::make_shared<ParticleKiller>(lifetime)
 	}));
@@ -394,8 +399,8 @@ static void loadPlanet(Entity* entity, const EntityFactory::Context& context, co
 			const nlohmann::json& atmosphere = it.value();
 			
 			vis::BruentonAtmosphereConfig atmosphereConfig;
-			atmosphereConfig.bottomRadius = planetRadius;
-			atmosphereConfig.topRadius = planetRadius * 1.0094; // TODO: determine programatically from scale height
+			atmosphereConfig.bottomRadius = readOptionalOrDefault(atmosphere, "bottomRadius", planetRadius);
+			atmosphereConfig.topRadius = readOptionalOrDefault(atmosphere, "topRadius", planetRadius * 1.0094); // TODO: determine programatically from scale height
 
 			if (auto coefficient = readOptional<double>(atmosphere, "earthReyleighScatteringCoefficient"))
 			{
@@ -429,16 +434,16 @@ static void loadPlanet(Entity* entity, const EntityFactory::Context& context, co
 		}
 	}
 	
+	int elevationMaxLodLevel;
 	const nlohmann::json& layers = json.at("surface");
 	{
 		nlohmann::json elevation = layers.at("elevation");
-		config.elevationMaxLodLevel = elevation.at("maxLevel");
 		config.planetTileSources.elevation = context
 			.tileSourceFactoryRegistry->getFactory(elevation.at("format"))(elevation);
+		elevationMaxLodLevel = elevation.at("maxLevel");
 	}
 	{
 		nlohmann::json albedo = layers.at("albedo");
-		config.albedoMaxLodLevel = albedo.at("maxLevel");
 		config.planetTileSources.albedo = context
 			.tileSourceFactoryRegistry->getFactory(albedo.at("format"))(albedo);
 	}
@@ -447,8 +452,6 @@ static void loadPlanet(Entity* entity, const EntityFactory::Context& context, co
 	{
 		config.planetTileSources.attribute = context
 			.tileSourceFactoryRegistry->getFactory(it->at("format"))(*it);
-		config.attributeMinLodLevel = it->at("minLevel");
-		config.attributeMaxLodLevel = it->at("maxLevel");
 	}
 	it = layers.find("uniformDetail");
 	if (it != layers.end())
@@ -502,7 +505,7 @@ static void loadPlanet(Entity* entity, const EntityFactory::Context& context, co
 			params.forestGeoVisibilityRange = it.value().at("treeVisibilityRangeMeters");
 			params.treesPerLinearMeter = it.value().at("treesPerLinearMeter");
 			params.minTileLodLevelToDisplayForest = it.value().at("minLevel");
-			params.maxTileLodLevelToDisplayForest = std::max(config.elevationMaxLodLevel, config.attributeMaxLodLevel);
+			params.maxTileLodLevelToDisplayForest = it.value().at("maxLevel");
 			config.forestParams = params;
 		}
 	}
@@ -524,7 +527,7 @@ static void loadPlanet(Entity* entity, const EntityFactory::Context& context, co
 	entity->addComponent(visObjectsComponent);
 	visObjectsComponent->addObject(visObject);
 
-	auto altitudeProvider = std::make_shared<vis::TileAsyncPlanetAltitudeProvider>(context.scheduler, config.planetTileSources.elevation, config.elevationMaxLodLevel);
+	auto altitudeProvider = std::make_shared<vis::TileAsyncPlanetAltitudeProvider>(context.scheduler, config.planetTileSources.elevation, elevationMaxLodLevel);
 	auto planetComponent = std::make_shared<PlanetComponent>(planetRadius, hasOcean, altitudeProvider);
 	entity->addComponent(planetComponent);
 
@@ -668,20 +671,31 @@ const float moonDistance = sunDistance;
 const float sunDiameter = 2.0f * tan(skybolt::math::degToRadF() * 0.53f * 0.5f) * sunDistance;
 const float moonDiameter = 2.0f * tan(skybolt::math::degToRadF() * 0.52f * 0.5f) * moonDistance;
 
-EntityPtr EntityFactory::createSun() const
+static osg::ref_ptr<osg::StateSet> createCelestialBodyStateSet(const osg::ref_ptr<osg::Program>& program, const osg::ref_ptr<osg::Image>& image)
 {
 	osg::StateSet* ss = new osg::StateSet;
-	ss->setAttribute(mContext.programs->getRequiredProgram("sun"));
+	ss->setAttribute(program);
 	ss->setMode(GL_CULL_FACE, osg::StateAttribute::OFF);
 
 	osg::Depth* depth = new osg::Depth;
 	depth->setWriteMask(false);
 	ss->setAttributeAndModes(depth, osg::StateAttribute::ON);
 
-	osg::Texture2D* texture = new osg::Texture2D(osgDB::readImageFile("Environment/Space/SunDisc.png"));
+	osg::Texture2D* texture = new osg::Texture2D(image);
 	texture->setInternalFormat(vis::toSrgbInternalFormat(texture->getInternalFormat()));
 	ss->setTextureAttributeAndModes(0, texture);
 	ss->addUniform(vis::createUniformSampler2d("albedoSampler", 0));
+
+	vis::setRenderBin(*ss, vis::RenderBinId::CelestialBody);
+
+	return ss;
+}
+
+EntityPtr EntityFactory::createSun() const
+{
+	osg::ref_ptr<osg::StateSet> ss = createCelestialBodyStateSet(
+		mContext.programs->getRequiredProgram("sun"),
+		osgDB::readImageFile("Environment/Space/SunDisc.png"));
 
 	osg::ref_ptr<osg::BlendFunc> blendFunc = new osg::BlendFunc;
 	ss->setAttributeAndModes(blendFunc);
@@ -715,21 +729,12 @@ EntityPtr EntityFactory::createSun() const
 
 EntityPtr EntityFactory::createMoon() const
 {
-	osg::StateSet* ss = new osg::StateSet;
-	ss->setAttribute(mContext.programs->getRequiredProgram("moon"));
-	ss->setMode(GL_CULL_FACE, osg::StateAttribute::OFF);
-
-	osg::Depth* depth = new osg::Depth;
-	depth->setWriteMask(false);
-	ss->setAttributeAndModes(depth, osg::StateAttribute::ON);
+	osg::ref_ptr<osg::StateSet> ss = createCelestialBodyStateSet(
+		mContext.programs->getRequiredProgram("moon"),
+		osgDB::readImageFile("Environment/Space/MoonDisc.jpg"));
 
 	osg::Uniform* moonPhaseUniform = new osg::Uniform("moonPhase", 0.5f);
 	ss->addUniform(moonPhaseUniform);
-
-	osg::Texture2D* texture = new osg::Texture2D(vis::readImageWithCorrectOrientation("Environment/Space/MoonDisc.jpg"));
-	texture->setInternalFormat(vis::toSrgbInternalFormat(texture->getInternalFormat()));
-	ss->setTextureAttributeAndModes(0, texture);
-	ss->addUniform(vis::createUniformSampler2d("albedoSampler", 0));
 
 	EntityPtr object(new Entity());
 	object->addComponent(std::make_shared<Node>());

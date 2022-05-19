@@ -5,10 +5,11 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "LakesBatch.h"
+#include "SkyboltVis/Camera.h"
 #include "SkyboltVis/OsgGeometryHelpers.h"
 #include "SkyboltVis/OsgImageHelpers.h"
 #include "SkyboltVis/OsgStateSetHelpers.h"
-#include "SkyboltVis/Camera.h"
+#include <SkyboltVis/VisibilityCategory.h>
 
 #include <osg/Geode>
 #include <osg/Geometry>
@@ -125,8 +126,7 @@ osg::ref_ptr<osg::StateSet> createStateSet(const osg::ref_ptr<osg::Program>& pro
 	return ss;
 }
 
-LakesBatch::LakesBatch(const Lakes& lakes, const LakesConfig& config) :
-	mTransform(new osg::MatrixTransform)
+LakesBatch::LakesBatch(const Lakes& lakes, const LakesConfig& config)
 {
 	mUniforms.modelMatrix = new osg::Uniform("modelMatrix", osg::Matrixf());
 
@@ -134,6 +134,7 @@ LakesBatch::LakesBatch(const Lakes& lakes, const LakesConfig& config) :
 	geode->setStateSet(createStateSet(config.program, mUniforms));
 
 	mTransform->setStateSet(config.waterStateSet);
+	mTransform->setNodeMask(~vis::VisibilityCategory::shadowCaster);
 	mTransform->addChild(geode);
 }
 

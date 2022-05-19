@@ -14,6 +14,7 @@
 #include "Ocean.h"
 #include "Brdfs/BlinnPhong.h"
 #include "Brdfs/Lambert.h"
+#include "Util/Saturate.h"
 
 in vec2 geoTexCoord;
 in vec2 albedoTexCoord;
@@ -62,10 +63,11 @@ void main()
 		
 #ifdef ENABLE_ATMOSPHERE
 	color.rgb = totalReflectance * scattering.transmittance + scattering.skyRadianceToPoint;
-
 #else
 	color.rgb = totalReflectance;
 #endif
+
+	color.rgb = saturate(color.rgb); // Saturate to avoid fireflies from specular
 
 #ifdef DEBUG_EDGES
 

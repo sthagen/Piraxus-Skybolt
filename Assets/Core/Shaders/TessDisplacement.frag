@@ -6,6 +6,8 @@
 
 #version 440 core
 #pragma import_defines ( CAST_SHADOWS )
+#pragma import_defines ( ENABLE_ATMOSPHERE )
+#pragma import_defines ( ENABLE_OCEAN )
 #pragma import_defines ( ENABLE_SHADOWS )
 #pragma import_defines ( DETAIL_MAPPING_TECHNIQUE_ALBEDO_DERIVED )
 #pragma import_defines ( DETAIL_MAPPING_TECHNIQUE_UNIFORM )
@@ -17,7 +19,6 @@
 #include "Ocean.h"
 #include "Rerange.h"
 #include "Remap.h"
-#include "Saturate.h"
 #include "Brdfs/BlinnPhong.h"
 #include "Brdfs/Lambert.h"
 #include "Noise/Fbm.h"
@@ -329,32 +330,67 @@ void main()
 	return;
 #endif
 
-	vec2 normalUv = texCoord.xy * heightMapUvScale + heightMapUvOffset;
-	vec3 normal = getTerrainNormalFromRG(texture(normalSampler, normalUv));
-	normal = vec3(normal.z, normal.x, -normal.y);
-	
-#ifdef ADD_NORMAL_FBM_NOISE
-	mat3 tbn = toTbnMatrix(normal);
-	normal = fbmNormal() * tbn;
-#endif
-
-	float snowCoverage = 0.0;
-	vec3 albedo = texture(overallAlbedoSampler, texCoord.xy * overallAlbedoMapUvScale + overallAlbedoMapUvOffset).rgb;
-
 	vec3 positionRelCamera = position_worldSpace - cameraPosition;
 	float fragmentViewDistance = length(positionRelCamera);
-	vec3 viewDirection = -positionRelCamera / fragmentViewDistance;
 
-#if defined(DETAIL_MAPPING_TECHNIQUE_UNIFORM)
-	albedo += (dot(vec3(0.33333), sampleDetailTexture().rgb) - vec3(0.5))*0.6;
-#elif defined(DETAIL_MAPPING_TECHNIQUE_ALBEDO_DERIVED)
-	vec3 attributeColor = 0.9*sampleAttributeDetailTextures(normal, normalUv, albedo).rgb;
-	float albedoBlend = clamp(fragmentViewDistance / 8000, 0.0, 1.0);
+#ifdef ENABLE_OCEAN
+	const bool isWater = (elevation < 0);
 	
-	albedo = mix(attributeColor * (vec3(0.5) + albedo), albedo, albedoBlend);
-	//albedo = mix(attributeColor, albedo, albedoBlend);
+	// Discard and early out if terrain covered by ocean mesh
+	if (isWater)
+	{
+		if (fragmentViewDistance < oceanMeshFadeoutStartDistance)
+		{
+			discard;
+			return;
+		}
+	}
+#else
+	const bool isWater = false;
 #endif
 
+	vec3 viewDirection = -positionRelCamera / fragmentViewDistance;
+	vec2 normalUv = texCoord.xy * heightMapUvScale + heightMapUvOffset;
+	
+	// Calculate normal
+	vec3 normal;
+	if (isWater)
+	{
+		normal = normalize(position_worldSpace - planetCenter);
+	}
+	else
+	{
+		normal = getTerrainNormalFromRG(texture(normalSampler, normalUv));
+		normal = vec3(normal.z, normal.x, -normal.y);
+		
+#ifdef ADD_NORMAL_FBM_NOISE
+		mat3 tbn = toTbnMatrix(normal);
+		normal = fbmNormal() * tbn;
+#endif
+	}
+
+	// Calculate albedo
+	vec3 albedo;
+	if (isWater)
+	{
+		albedo = deepScatterColor;
+	}
+	else
+	{
+		albedo = texture(overallAlbedoSampler, texCoord.xy * overallAlbedoMapUvScale + overallAlbedoMapUvOffset).rgb;
+
+	#if defined(DETAIL_MAPPING_TECHNIQUE_UNIFORM)
+		albedo += (dot(vec3(0.33333), sampleDetailTexture().rgb) - vec3(0.5))*0.6;
+	#elif defined(DETAIL_MAPPING_TECHNIQUE_ALBEDO_DERIVED)
+		vec3 attributeColor = 0.9*sampleAttributeDetailTextures(normal, normalUv, albedo).rgb;
+		float albedoBlend = clamp(fragmentViewDistance / 8000, 0.0, 1.0);
+		
+		albedo = mix(attributeColor * (vec3(0.5) + albedo), albedo, albedoBlend);
+		//albedo = mix(attributeColor, albedo, albedoBlend);
+	#endif
+	}
+
+	// Calculate lighting
 #ifdef ENABLE_SHADOWS
 	float lightVisibility = sampleShadowsAtWorldPosition(position_worldSpace, dot(normal, lightDirection), fragmentViewDistance);
 #else
@@ -363,25 +399,11 @@ void main()
 
 	vec3 visibleSunIrradiance = scattering.sunIrradiance * lightVisibility;
 	
-	vec3 specularReflectance;
-	
-	// Snow
-	if (snowCoverage > 0)
-	{
-		specularReflectance = snowCoverage * calcBlinnPhongSpecular(lightDirection, viewDirection, normal, snowShininess) * visibleSunIrradiance;
-	}
+	vec3 specularReflectance = vec3(0);
 
-	// Water
-	bool isWater = (elevation < 0);
 	if (isWater)
 	{
-		normal = normalize(position_worldSpace - planetCenter);
-		specularReflectance = oceanSpecularColor * calcBlinnPhongSpecular(lightDirection, viewDirection, normal, oceanShininess) * visibleSunIrradiance;
-		albedo = deepScatterColor;
-	}
-	else
-	{
-		specularReflectance = vec3(0);
+		specularReflectance += oceanSpecularColor * calcBlinnPhongSpecular(lightDirection, viewDirection, normal, oceanShininess) * visibleSunIrradiance;
 	}
 
 	vec3 totalReflectance = albedo * (
@@ -398,7 +420,13 @@ void main()
 		totalReflectance = mix(totalReflectance, scattering.skyIrradiance, fresnel);
 	}
 
+#ifdef ENABLE_ATMOSPHERE
 	color.rgb = totalReflectance * scattering.transmittance + scattering.skyRadianceToPoint;
+#else
+	color.rgb = totalReflectance;
+#endif
+
+	color.rgb = saturate(color.rgb); // Saturate to avoid fireflies from specular
 
 //#define DEBUG_EDGES
 #ifdef DEBUG_EDGES
@@ -408,5 +436,12 @@ void main()
 	}
 #endif
 	gl_FragDepth = logarithmicZ_fragmentShader(logZ);
+	
+	// Hack to ensure terrain is drawn under water plane
+	if (isWater)
+	{
+		gl_FragDepth += 0.0002;
+	}
+	
 	color.a = 1;
 }
