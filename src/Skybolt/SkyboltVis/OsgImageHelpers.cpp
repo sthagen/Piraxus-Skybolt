@@ -97,6 +97,9 @@ GLuint toSrgbInternalFormat(GLuint format)
 	case GL_COMPRESSED_RGBA_S3TC_DXT1_EXT:
 	case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT:
 		return GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT1_EXT;
+	case GL_COMPRESSED_RGBA_S3TC_DXT3_EXT:
+	case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT:
+		return GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT3_EXT;
 	case GL_COMPRESSED_RGBA_S3TC_DXT5_EXT:
 	case GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT:
 		return GL_COMPRESSED_SRGB_ALPHA_S3TC_DXT5_EXT;
@@ -171,6 +174,59 @@ osg::Vec4f getColorBilinear(const osg::Image& image, const osg::Vec2f& coord)
 	osg::Vec4f d1 = math::componentWiseLerp(d01, d11, fracUVec);
 
 	return math::componentWiseLerp(d0, d1, osg::Vec4f(fracV, fracV, fracV, fracV));
+}
+
+static osg::Vec4f componentWiseMin(const osg::Vec4f& a, const osg::Vec4f& b)
+{
+	osg::Vec4f r;
+	for (int i = 0; i < osg::Vec4f::num_components; ++i)
+	{
+		r[i] = std::min(a[i], b[i]);
+	}
+	return r;
+}
+
+static osg::Vec4f componentWiseMax(const osg::Vec4f& a, const osg::Vec4f& b)
+{
+	osg::Vec4f r;
+	for (int i = 0; i < osg::Vec4f::num_components; ++i)
+	{
+		r[i] = std::max(a[i], b[i]);
+	}
+	return r;
+}
+
+void normalize(osg::Image& image)
+{
+	float inf = std::numeric_limits<float>::infinity();
+	osg::Vec4f cMin(inf, inf, inf, inf);
+	osg::Vec4f cMax(0, 0, 0, 0);
+
+	for (int z = 0; z < image.r(); ++z)
+	{
+		for (int y = 0; y < image.t(); ++y)
+		{
+			for (int x = 0; x < image.s(); ++x)
+			{
+				osg::Vec4f c = image.getColor(x, y, z);
+				cMin = componentWiseMin(c, cMin);
+				cMax = componentWiseMax(c, cMax);
+			}
+		}
+	}
+
+	for (int z = 0; z < image.r(); ++z)
+	{
+		for (int y = 0; y < image.t(); ++y)
+		{
+			for (int x = 0; x < image.s(); ++x)
+			{
+				osg::Vec4f c = image.getColor(x, y, z);
+				c = osg::componentDivide((c - cMin), (cMax - cMin));
+				image.setColor(c, x, y, z);
+			}
+		}
+	}
 }
 
 } // namespace vis

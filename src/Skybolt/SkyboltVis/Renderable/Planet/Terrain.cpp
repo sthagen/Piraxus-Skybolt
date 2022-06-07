@@ -108,6 +108,10 @@ static void setupTerrainStateSet(osg::StateSet& ss, const TerrainConfig& config)
 		ss.setTextureAttributeAndModes(unit, config.normalMap);
 		ss.addUniform(createUniformSampler2d("normalSampler", unit++));
 	}
+	{
+		ss.setTextureAttributeAndModes(unit, config.landMask);
+		ss.addUniform(createUniformSampler2d("landMaskSampler", unit++));
+	}
 
 	ss.setTextureAttributeAndModes(unit, config.overallAlbedoMap);
 	ss.addUniform(createUniformSampler2d("overallAlbedoSampler", unit++));
@@ -121,7 +125,7 @@ static void setupTerrainStateSet(osg::StateSet& ss, const TerrainConfig& config)
 	if (auto uniformTechnique = dynamic_cast<const UniformDetailMappingTechnique*>(config.detailMappingTechnique.get()); uniformTechnique)
 	{
 		ss.setDefine("DETAIL_MAPPING_TECHNIQUE_UNIFORM");
-		ss.setDefine("DETAIL_SAMPLER_COUNT", 1);
+		ss.setDefine("DETAIL_SAMPLER_COUNT");
 		
 		ss.setTextureAttributeAndModes(unit, uniformTechnique->albedoDetailMap);
 		ss.addUniform(createUniformSampler2d("albedoDetailSamplers", unit++));

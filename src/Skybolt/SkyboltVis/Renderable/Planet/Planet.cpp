@@ -331,14 +331,11 @@ static osg::ref_ptr<osg::Texture2D> createNonSrgbTextureWithoutMipmaps(const osg
 	return texture;
 }
 
-static osg::ref_ptr<osg::Texture2D> createSrgbTexture(const osg::ref_ptr<osg::Image>& image)
+static osg::ref_ptr<osg::Texture2D> createSrgbTextureWithClampToEdge(const osg::ref_ptr<osg::Image>& image)
 {
-	osg::ref_ptr<osg::Texture2D> texture = new osg::Texture2D(image);
-	texture->setInternalFormat(toSrgbInternalFormat(texture->getInternalFormat()));
+	osg::ref_ptr<osg::Texture2D> texture = vis::createSrgbTexture(image);
 	texture->setWrap(osg::Texture::WRAP_S, osg::Texture::CLAMP_TO_EDGE);
 	texture->setWrap(osg::Texture::WRAP_T, osg::Texture::CLAMP_TO_EDGE);
-	texture->setFilter(osg::Texture::MIN_FILTER, osg::Texture::LINEAR_MIPMAP_LINEAR);
-	texture->setFilter(osg::Texture::MAG_FILTER, osg::Texture::LINEAR);
 	texture->setMaxAnisotropy(8);
 	return texture;
 }
@@ -537,7 +534,7 @@ Planet::Planet(const PlanetConfig& config) :
 				osg::Vec2f pos(0.2 + 0.4*i, 0.7);
 				osg::Vec2f size(0.3, 0.3);
 				BoundingBox2f box(pos, pos + size);
-				ScreenQuad* quad = new ScreenQuad(createTexturedQuadStateSet(config.programs->hudGeometry, stateSetConfig.waveFoamMaskTexture[i]), box);
+				ScreenQuad* quad = new ScreenQuad(createTexturedQuadStateSet(config.programs->getRequiredProgram("hudGeometry"), stateSetConfig.waveHeightTexture[i]), box);
 				mScene->addObject(quad);
 #endif
 			}
@@ -837,10 +834,10 @@ void Planet::updatePreRender(const RenderContext& context)
 	osg::Vec3f position = getPosition();
 	mPlanetCenterUniform->set(position);
 
-	osg::Matrixf planetMatrix;
-	getOrientation().get(planetMatrix);
-	planetMatrix = osg::Matrixf::inverse(planetMatrix);
-	mPlanetMatrixInvUniform->set(planetMatrix);
+	osg::Matrixf planetMatrixInv;
+	getOrientation().get(planetMatrixInv);
+	planetMatrixInv = osg::Matrixf::inverse(planetMatrixInv);
+	mPlanetMatrixInvUniform->set(planetMatrixInv);
 
 	mPlanetSurface->updatePreRender(context);
 	if (mPlanetFeatures)
@@ -858,21 +855,25 @@ void Planet::updatePreRender(const RenderContext& context)
 
 	if (mWaveHeightTextureGenerator)
 	{
-		double loopPeriod = 1000; // TODO: Seamless looping
-		double timeSeconds = std::fmod(julianDateSeconds, loopPeriod);
-		
-		if (mWaveHeightTextureGenerator->update(timeSeconds))
+		double altitude = (getPosition() - context.camera.getPosition()).length() - mInnerRadius;
+		if (altitude < 40000) // TODO: ensure this value matches oceanMeshFadeoutEndDistance in Ocean.h shader file
 		{
-			for (const auto& generator : mWaterSurfaceGpuTextureGenerators)
+			double loopPeriod = 1000; // TODO: Seamless looping
+			double timeSeconds = std::fmod(julianDateSeconds, loopPeriod);
+		
+			if (mWaveHeightTextureGenerator->update(timeSeconds))
 			{
-				generator->requestRender();
-			}
+				for (const auto& generator : mWaterSurfaceGpuTextureGenerators)
+				{
+					generator->requestRender();
+				}
 
-			for (int i = 0; i < CascadedWaveHeightTextureGenerator::numCascades; ++i)
-			{
-				mWaveFoamMaskGenerator[i]->advanceTime(timeSeconds);
-				mWaterStateSet->setFoamTexture(i, mWaveFoamMaskGenerator[i]->getOutputTexture());
-				mWaveFoamMaskGenerator[i]->swapBuffers();
+				for (int i = 0; i < CascadedWaveHeightTextureGenerator::numCascades; ++i)
+				{
+					mWaveFoamMaskGenerator[i]->advanceTime(timeSeconds);
+					mWaterStateSet->setFoamTexture(i, mWaveFoamMaskGenerator[i]->getOutputTexture());
+					mWaveFoamMaskGenerator[i]->swapBuffers();
+				}
 			}
 		}
 	}

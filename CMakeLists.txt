@@ -6,7 +6,7 @@ if(${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.19.0")
 endif()
 
 project(Skybolt)
-set(PACKAGE_VERSION 1.3.0)
+set(PACKAGE_VERSION 1.3.1)
 
 enable_testing()
 
@@ -21,6 +21,13 @@ list(APPEND CMAKE_MODULE_PATH
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/lib)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
+OPTION(SKYBOLT_PLUGINS_STATIC_BUILD "Build skybolt plugins as static libraries" OFF)
+if (SKYBOLT_PLUGINS_STATIC_BUILD)
+	set (SKYBOLT_PLUGINS_LIBRARY_TYPE STATIC)
+else()
+	set (SKYBOLT_PLUGINS_LIBRARY_TYPE SHARED)
+endif()
 
 # Allow user to overwrite install path.
 # Solution from https://stackoverflow.com/questions/39481958/setting-cmake-install-prefix-from-cmakelists-txt-file
@@ -106,6 +113,7 @@ write_basic_package_version_file(
 
 install(
 	EXPORT SkyboltTargets
+	NAMESPACE Skybolt::
     DESTINATION cmake
 )
 

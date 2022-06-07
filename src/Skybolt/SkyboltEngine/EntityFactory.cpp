@@ -254,6 +254,10 @@ static void loadVisualCamera(Entity* entity, const EntityFactory::Context& conte
 
 static void loadParticleSystem(Entity* entity, const EntityFactory::Context& context, const VisObjectsComponentPtr& visObjectsComponent, const SimVisBindingsComponentPtr& simVisBindingComponent, const nlohmann::json& json)
 {
+	NearestPlanetProvider nearestPlanetProvider = [world = context.simWorld] (const Vector3& position) {
+		return findNearestEntityWithComponent<sim::PlanetComponent>(world->getEntities(), position);
+	};
+
 	ParticleEmitter::Params emitterParams;
 	emitterParams.emissionRate = json.at("emissionRate");
 	emitterParams.radius = json.at("radius");
@@ -262,6 +266,10 @@ static void loadParticleSystem(Entity* entity, const EntityFactory::Context& con
 	emitterParams.speed = DoubleRangeInclusive(json.at("speedMin"), json.at("speedMax"));
 	emitterParams.upDirection = readVector3(json.at("upDirection"));
 	emitterParams.random = std::make_shared<Random>(/* seed */ 0);
+	emitterParams.temperatureDegreesCelcius = readOptionalOrDefault(json, "initialTemperatureDegreesCelcius", 0.0);
+	emitterParams.zeroAtmosphericDensityAlpha = readOptionalOrDefault(json, "zeroAtmosphericDensityAlpha", 1.0);
+	emitterParams.earthSeaLevelAtmosphericDensityAlpha = readOptionalOrDefault(json, "earthSeaLevelAtmosphericDensityAlpha", 1.0);
+	emitterParams.nearestPlanetProvider = nearestPlanetProvider;
 
 	double lifetime = json.at("lifetime");
 
@@ -269,9 +277,8 @@ static void loadParticleSystem(Entity* entity, const EntityFactory::Context& con
 	integratorParams.lifetime = lifetime;
 	integratorParams.radiusLinearGrowthPerSecond = json.at("radiusLinearGrowthPerSecond");
 	integratorParams.atmosphericSlowdownFactor = json.at("atmosphericSlowdownFactor");
-	integratorParams.nearestPlanetProvider = [world = context.simWorld] (const Vector3& position) {
-		return findNearestEntityWithComponent<sim::PlanetComponent>(world->getEntities(), position);
-	};
+	integratorParams.heatTransferCoefficent = readOptional<float>(json, "heatTransferCoefficent");
+	integratorParams.nearestPlanetProvider = nearestPlanetProvider;
 
 	auto particleSystem = std::make_shared<ParticleSystem>(ParticleSystem::Operations({
 		std::make_shared<ParticleIntegrator>(integratorParams), // integrate before emission ensure new particles emitted at end of time step
@@ -442,12 +449,18 @@ static void loadPlanet(Entity* entity, const EntityFactory::Context& context, co
 			.tileSourceFactoryRegistry->getFactory(elevation.at("format"))(elevation);
 		elevationMaxLodLevel = elevation.at("maxLevel");
 	}
+	auto it = layers.find("landMask");
+	if (it != layers.end())
+	{
+		config.planetTileSources.landMask = context
+			.tileSourceFactoryRegistry->getFactory(it->at("format"))(*it);
+	}
 	{
 		nlohmann::json albedo = layers.at("albedo");
 		config.planetTileSources.albedo = context
 			.tileSourceFactoryRegistry->getFactory(albedo.at("format"))(albedo);
 	}
-	auto it = layers.find("attribute");
+	it = layers.find("attribute");
 	if (it != layers.end())
 	{
 		config.planetTileSources.attribute = context
@@ -681,8 +694,7 @@ static osg::ref_ptr<osg::StateSet> createCelestialBodyStateSet(const osg::ref_pt
 	depth->setWriteMask(false);
 	ss->setAttributeAndModes(depth, osg::StateAttribute::ON);
 
-	osg::Texture2D* texture = new osg::Texture2D(image);
-	texture->setInternalFormat(vis::toSrgbInternalFormat(texture->getInternalFormat()));
+	osg::ref_ptr<osg::Texture2D> texture = vis::createSrgbTexture(image);
 	ss->setTextureAttributeAndModes(0, texture);
 	ss->addUniform(vis::createUniformSampler2d("albedoSampler", 0));
 

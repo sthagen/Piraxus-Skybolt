@@ -4,15 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#include "RenderBinHelpers.h"
+#pragma once
 
 namespace skybolt {
 namespace vis {
 
-void setRenderBin(osg::StateSet& stateSet, RenderBinId bin)
-{
-	stateSet.setRenderBinDetails(int(bin), (bin == RenderBinId::OsgTransparentBin) ? "DepthSortedBin" : "RenderBin");
-}
+void forwardOsgLogToBoost();
 
 } // namespace vis
 } // namespace skybolt
