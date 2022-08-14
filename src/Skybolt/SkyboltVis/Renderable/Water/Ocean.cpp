@@ -84,7 +84,6 @@ Ocean::Ocean(const OceanConfig& config)
 	mGrid->setStateSet(createStateSet(config, mUniforms));
 
 	mTransform->setStateSet(config.waterStateSet);
-	mTransform->setNodeMask(~vis::VisibilityCategory::shadowCaster);
     mTransform->addChild(mGrid);
 
 	setPosition(osg::Vec3f(0,0,0));
@@ -100,7 +99,7 @@ void Ocean::setPosition(const osg::Vec3f& position)
 	mUniforms.waterHeight->set(float(-position.z()));
 }
 
-void Ocean::updatePreRender(const RenderContext& context)
+void Ocean::updatePreRender(const CameraRenderContext& context)
 {
 	const Camera& camera = context.camera;
 	// Update uniforms

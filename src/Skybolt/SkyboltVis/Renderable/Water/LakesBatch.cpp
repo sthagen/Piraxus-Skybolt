@@ -134,11 +134,10 @@ LakesBatch::LakesBatch(const Lakes& lakes, const LakesConfig& config)
 	geode->setStateSet(createStateSet(config.program, mUniforms));
 
 	mTransform->setStateSet(config.waterStateSet);
-	mTransform->setNodeMask(~vis::VisibilityCategory::shadowCaster);
 	mTransform->addChild(geode);
 }
 
-void LakesBatch::updatePreRender(const RenderContext& context)
+void LakesBatch::updatePreRender(const CameraRenderContext& context)
 {
 	mUniforms.modelMatrix->set(mTransform->getWorldMatrices().front());
 }

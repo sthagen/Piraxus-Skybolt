@@ -6,15 +6,21 @@
 
 #pragma once
 
+#include <SkyboltVis/Renderable/Clouds/CloudRenderingParams.h>
+#include <SkyboltVis/Shadow/ShadowParams.h>
 #include <SkyboltVis/Window/DisplaySettings.h>
 #include <boost/program_options/variables_map.hpp>
+
 #include <nlohmann/json.hpp>
+#include <optional>
 
 namespace skybolt {
 
 nlohmann::json createDefaultEngineSettings();
 nlohmann::json readEngineSettings(const boost::program_options::variables_map& params);
 
-vis::DisplaySettings getDisplaySettingsFromEngineSettings(const nlohmann::json& j);
+vis::DisplaySettings getDisplaySettingsFromEngineSettings(const nlohmann::json& engineSettings);
+std::optional<vis::ShadowParams> getShadowParams(const nlohmann::json& engineSettings);
+vis::CloudRenderingParams getCloudRenderingParams(const nlohmann::json& engineSettings);
 
 } // namespace skybolt

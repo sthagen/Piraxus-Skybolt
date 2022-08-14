@@ -8,28 +8,33 @@
 
 #include "SkyboltVis/SkyboltVisFwd.h"
 #include "SkyboltVis/Renderable/ScreenQuad.h"
+#include "SkyboltVis/RenderOperation/RenderOperation.h"
 
 #include <osg/Texture2D>
 
 namespace skybolt {
 namespace vis {
 
-class GpuTextureGenerator : public osg::Group
+class GpuTextureGenerator : public RenderOperation
 {
 public:
 	GpuTextureGenerator(const osg::ref_ptr<osg::Texture2D>& texture, const osg::ref_ptr<osg::StateSet>& stateSet, bool generateMipMaps);
 	~GpuTextureGenerator();
 
-	void requestRender();
+	void requestRegenerate();
 
-	const osg::ref_ptr<osg::Camera>& getCamera() const { return mCamera; }
+	std::vector<osg::ref_ptr<osg::Texture>> getOutputTextures() const override
+	{
+		return { mTexture };
+	}
 
 private:
+	osg::ref_ptr<osg::Texture2D> mTexture;
 	osg::ref_ptr<osg::Camera> mCamera;
 	std::unique_ptr<ScreenQuad> mQuad;
 	bool mActive;
 
-	friend class DrawCallback;
+	friend class GpuTextureGeneratorDrawCallback;
 };
 
 } // namespace vis

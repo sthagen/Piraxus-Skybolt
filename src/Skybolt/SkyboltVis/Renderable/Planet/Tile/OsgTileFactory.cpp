@@ -10,7 +10,8 @@
 #include "SkyboltVis/OsgGeocentric.h"
 #include "SkyboltVis/OsgImageHelpers.h"
 #include "SkyboltVis/OsgStateSetHelpers.h"
-#include "SkyboltVis/ElevationProvider/HeightmapElevationProvider.h"
+#include "SkyboltVis/OsgTextureHelpers.h"
+#include "SkyboltVis/ElevationProvider/HeightMapElevationProvider.h"
 #include "SkyboltVis/Renderable/Planet/PlanetTileGeometry.h"
 #include "SkyboltVis/Shader/ShaderProgramRegistry.h"
 
@@ -25,7 +26,8 @@ OsgTileFactory::OsgTileFactory(const OsgTileFactoryConfig& config) :
 	mPrograms(config.programs),
 	mDetailMappingTechnique(config.detailMappingTechnique),
 	mPlanetRadius(config.planetRadius),
-	mHasCloudShadows(config.hasCloudShadows)
+	mHasCloudShadows(config.hasCloudShadows),
+	mHeightMapTexelsOnTileEdge(config.heightMapTexelsOnTileEdge)
 {
 	assert(mPrograms);
 }
@@ -37,6 +39,15 @@ OsgTile OsgTileFactory::createOsgTile(const QuadTreeTileKey& key, const Box2d& l
 	// Get heightmap for tile, and its scale and offset relative to the tile
 	osg::Vec2f heightImageScale, heightImageOffset;
 	getTileTransformInParentSpace(key, textures.height.key.level, heightImageScale, heightImageOffset);
+
+	if (mHeightMapTexelsOnTileEdge)
+	{
+		const auto& image = textures.height.texture->getImage();
+		ScaleOffset scaleOffset = calcHalfTexelEdgeRemovalScaleOffset(osg::Vec2i(image->s(), image->t()));
+		heightImageScale = math::componentWiseMultiply(heightImageScale, scaleOffset.scale);
+		heightImageOffset = math::componentWiseMultiply(heightImageOffset, scaleOffset.scale) + scaleOffset.offset;
+	}
+
 
 	OsgTile result;
 
@@ -101,8 +112,8 @@ OsgTile OsgTileFactory::createOsgTile(const QuadTreeTileKey& key, const Box2d& l
 
 		int unit = 0;
 		osg::StateSet* ss = geode->getOrCreateStateSet();
-		ss->addUniform(new osg::Uniform("heightScale", heightImageScale));
-		ss->addUniform(new osg::Uniform("heightOffset", heightImageOffset));
+		ss->addUniform(new osg::Uniform("heightMapUvScale", heightImageScale));
+		ss->addUniform(new osg::Uniform("heightMapUvOffset", heightImageOffset));
 
 		ss->addUniform(new osg::Uniform("albedoImageScale", albedoImageScale));
 		ss->addUniform(new osg::Uniform("albedoImageOffset", albedoImageOffset));

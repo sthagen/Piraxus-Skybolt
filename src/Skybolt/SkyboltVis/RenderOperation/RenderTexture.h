@@ -9,22 +9,25 @@
 
 #include "RenderTarget.h"
 #include <osg/Texture2D>
-#include <boost/optional.hpp>
 #include <boost/signals2.hpp>
 #include <functional>
+#include <optional>
 
 namespace skybolt {
 namespace vis {
 
 using TextureFactory = std::function<osg::ref_ptr<osg::Texture>(const osg::Vec2i&)>;
 
-TextureFactory createTextureFactory(GLint internalFormat);
+//! Creates a factory for creating textures to be displayed as a screen quad.
+//! These textures do not use mipmaps and do not repeat.
+TextureFactory createScreenTextureFactory(GLint internalFormat);
 
 struct RenderTextureConfig
 {
-	TextureFactory colorTextureFactory;
-	boost::optional<TextureFactory> depthTextureFactory;
+	std::vector<TextureFactory> colorTextureFactories;
+	std::optional<TextureFactory> depthTextureFactory;
 	int multisampleSampleCount = 0;
+	bool clear = true;
 };
 
 class RenderTexture : public RenderTarget
@@ -33,19 +36,18 @@ public:
 	RenderTexture(const RenderTextureConfig& config);
 	~RenderTexture();
 
-	//! Called whenever the color texture is (re)created, e.g if render target is resized
-	boost::signals2::signal<void(const osg::ref_ptr<osg::Texture>& texture)> colorTextureCreated;
-
-	//! Called whenever the depth texture is (re)created, e.g if render target is resized
-	boost::signals2::signal<void(const osg::ref_ptr<osg::Texture>& texture)> depthTextureCreated;
-
 public: // RenderTarget interface
-	void updatePreRender() override;
+	void updatePreRender(const RenderContext& renderContext) override;
+
+	std::vector<osg::ref_ptr<osg::Texture>> getOutputTextures() const override
+	{
+		return mColorTextures;
+	}
 
 private:
-	osg::ref_ptr<osg::Texture> mTexture;
-	TextureFactory mColorTextureFactory;
-	boost::optional<TextureFactory> mDepthTextureFactory;
+	std::vector<osg::ref_ptr<osg::Texture>> mColorTextures;
+	std::vector<TextureFactory> mColorTextureFactories;
+	std::optional<TextureFactory> mDepthTextureFactory;
 	int mMultisampleSampleCount;
 };
 

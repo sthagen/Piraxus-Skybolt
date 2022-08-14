@@ -56,6 +56,7 @@ public:
 	EngineStats stats;
 	Scenario scenario;
 	sim::SystemRegistryPtr systemRegistry;
+	nlohmann::json engineSettings;
 };
 
 file::Path locateFile(const std::string& filename, file::FileLocatorMode mode);

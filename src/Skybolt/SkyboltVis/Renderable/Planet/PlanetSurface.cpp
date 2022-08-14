@@ -14,6 +14,7 @@
 #include "SkyboltVis/RenderContext.h"
 #include "SkyboltVis/Camera.h"
 #include "SkyboltVis/Scene.h"
+#include "SkyboltVis/VisibilityCategory.h"
 #include "SkyboltVis/Renderable/Forest/GpuForestTile.h"
 #include "SkyboltVis/Renderable/Forest/PagedForest.h"
 #include "SkyboltVis/Renderable/Planet/Tile/ConcurrentAsyncTileLoader.h"
@@ -65,6 +66,8 @@ PlanetSurface::PlanetSurface(const PlanetSurfaceConfig& config) :
 	mGpuForest(config.gpuForest),
 	mGroup(new osg::Group)
 {
+	mGroup->setNodeMask(vis::VisibilityCategory::defaultCategories);
+
 	auto planetTileSources = config.planetTileSources;
 	assert(planetTileSources.albedo);
 	assert(planetTileSources.elevation);
@@ -164,7 +167,7 @@ static sim::LatLon toLatLon(const osg::Vec2d& latLon)
 	return sim::LatLon(latLon.x(), latLon.y());
 }
 
-void PlanetSurface::updatePreRender(const RenderContext& context)
+void PlanetSurface::updatePreRender(const CameraRenderContext& context)
 {
 	osg::Vec3d geocentricPos = context.camera.getPosition() * osg::Matrix::inverse(mParentTransform->getMatrix());
 
@@ -184,7 +187,7 @@ void PlanetSurface::updatePreRender(const RenderContext& context)
 
 	updateGeometry();
 
-	LlaToNedConverter converter(toLatLon(mPredicate->observerLatLon), boost::none);
+	LlaToNedConverter converter(toLatLon(mPredicate->observerLatLon), std::nullopt);
 	for (const auto& node : mTileNodes)
 	{
 		const OsgTile& tile = node.second;

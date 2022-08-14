@@ -7,18 +7,17 @@
 #include "StatsDisplaySystem.h"
 #include "SkyboltEngine/VisHud.h"
 #include <SkyboltVis/Scene.h>
+#include <SkyboltVis/RenderOperation/RenderTarget.h>
 #include <SkyboltVis/Window/Window.h>
 #include <osgViewer/Viewer>
 
 namespace skybolt {
 
-StatsDisplaySystem::StatsDisplaySystem(const vis::Window& window)
+StatsDisplaySystem::StatsDisplaySystem(osgViewer::Viewer* viewer, const osg::ref_ptr<osg::Camera>& camera) :
+	mCamera(camera)
 {
-	osgViewer::Viewer& viewer = window.getViewer();
-	mCamera = window.getRenderTargets().back().target->getOsgCamera();
-
-	mViewerStats = viewer.getStats();
-	mCameraStats = viewer.getCamera()->getStats();
+	mViewerStats = viewer->getStats();
+	mCameraStats = viewer->getCamera()->getStats();
 
 	mViewerStats->collectStats("frame_rate", true);
 	mCameraStats->collectStats("gpu", true);

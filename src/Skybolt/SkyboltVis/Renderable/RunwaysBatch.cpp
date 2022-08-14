@@ -439,11 +439,10 @@ RunwaysBatch::RunwaysBatch(const Runways& runways, const osg::ref_ptr<osg::Progr
 	mUniforms.modelMatrix = new osg::Uniform("modelMatrix", osg::Matrixf());
 
 	geode->setStateSet(createStateSet(mUniforms));
-	mTransform->setNodeMask(~vis::VisibilityCategory::shadowCaster);
 	mTransform->addChild(geode);
 }
 
-void RunwaysBatch::updatePreRender(const RenderContext& context)
+void RunwaysBatch::updatePreRender(const CameraRenderContext& context)
 {
 	mUniforms.modelMatrix->set(mTransform->getWorldMatrices().front());
 }

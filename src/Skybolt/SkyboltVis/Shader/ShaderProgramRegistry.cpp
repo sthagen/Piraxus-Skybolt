@@ -20,8 +20,17 @@ const osg::ref_ptr<osg::Program>& ShaderPrograms::getRequiredProgram(const std::
 	throw std::runtime_error("Shader '" + name + "' not defined");
 }
 
-using ShaderProgramSourceFiles = std::map<osg::Shader::Type, std::string>; //!< Source code files for a program
 using ShaderProgramSourceFilesRegistry = std::map<std::string, ShaderProgramSourceFiles>;
+
+ShaderProgramSourceFiles getShaderSource_terrainFlatTile()
+{
+	return {
+		{ osg::Shader::VERTEX, "Shaders/TessDisplacement.vert" },
+		{ osg::Shader::TESSCONTROL, "Shaders/TessDisplacement.tctrl" },
+		{ osg::Shader::TESSEVALUATION, "Shaders/TessDisplacement.teval" },
+		{ osg::Shader::FRAGMENT, "Shaders/TessDisplacement.frag" }
+	};
+}
 
 static ShaderProgramSourceFilesRegistry createShaderProgramSourceFilesRegistry()
 {
@@ -33,6 +42,10 @@ static ShaderProgramSourceFilesRegistry createShaderProgramSourceFilesRegistry()
 		{ "cloud", {
 			{ osg::Shader::VERTEX, "Shaders/BillboardCloud.vert" },
 			{ osg::Shader::FRAGMENT, "Shaders/BillboardCloud.frag" }
+		}},
+		{ "cloudsTemporalUpscaling", {
+			{ osg::Shader::VERTEX, "Shaders/ScreenQuad.vert" },
+			{ osg::Shader::FRAGMENT, "Shaders/CloudsTemporalUpscaling.frag" }
 		}},
 		{ "compositeClouds", {
 			{ osg::Shader::VERTEX, "Shaders/ScreenQuad.vert" },
@@ -90,12 +103,7 @@ static ShaderProgramSourceFilesRegistry createShaderProgramSourceFilesRegistry()
 			{ osg::Shader::VERTEX, "Shaders/Starfield.vert" },
 			{ osg::Shader::FRAGMENT, "Shaders/Starfield.frag" }
 		}},
-		{ "terrainFlatTile", {
-			{ osg::Shader::VERTEX, "Shaders/TessDisplacement.vert" },
-			{ osg::Shader::TESSCONTROL, "Shaders/TessDisplacement.tctrl" },
-			{ osg::Shader::TESSEVALUATION, "Shaders/TessDisplacement.teval" },
-			{ osg::Shader::FRAGMENT, "Shaders/TessDisplacement.frag" }
-		}},
+		{ "terrainFlatTile", getShaderSource_terrainFlatTile() },
 		{ "terrainPlanetTile", {
 			{ osg::Shader::VERTEX, "Shaders/TessDisplacementPlanet.vert" },
 			{ osg::Shader::TESSCONTROL, "Shaders/TessDisplacement.tctrl" },
@@ -159,6 +167,16 @@ static ShaderProgramSourceFilesRegistry createShaderProgramSourceFilesRegistry()
 			{ osg::Shader::FRAGMENT, "Shaders/HudTexture3d.frag" }
 		}},
 	};
+}
+
+osg::ref_ptr<osg::Program> createProgram(const std::string& name, const ShaderProgramSourceFiles& files)
+{
+	osg::ref_ptr<osg::Program> p = new osg::Program();
+	for (auto file : files)
+	{
+		p->addShader(vis::readShaderFile(file.first, file.second));
+	}
+	return p;
 }
 
 ShaderPrograms createShaderPrograms()

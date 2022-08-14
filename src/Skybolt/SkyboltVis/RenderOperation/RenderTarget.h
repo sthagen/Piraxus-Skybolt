@@ -7,32 +7,27 @@
 
 #pragma once
 
-#include "SkyboltVis/SkyboltVisFwd.h"
+#include "SkyboltVis/RenderOperation/RenderOperation.h"
 #include "SkyboltVis/Rect.h"
 
 #include <osg/Camera>
 #include <osg/Group>
 
+#include <functional>
+#include <variant>
+
 namespace skybolt {
 namespace vis {
 
-// Wraps an osg::Camera, and provides an interface for binding a vis::Camera and scene to the osg::Camera.
-class RenderTarget : public osg::Group
+// A RenderOperation that renders a scene using a vis::Camera
+class RenderTarget : public RenderOperation
 {
-	friend class RenderTargetNodeCallback;
 public:
-	struct Scene
-	{
-		virtual ~Scene() {}
-		virtual void updatePreRender(const Camera& camera) {}
-		virtual osg::ref_ptr<osg::Node> getNode() = 0;
-	};
-
 	RenderTarget(const osg::ref_ptr<osg::Camera>& osgCamera);
 
-	virtual void setRect(const RectI& rect);
+	virtual void setRelativeRect(const RectF& rect); //!< Sets rect size relative to parent render target (usually the window). Default is full rect.
 
-	virtual void setScene(const std::shared_ptr<Scene>& scene);
+	virtual void setScene(const osg::ref_ptr<osg::Node>& scene);
 
 	virtual void setCamera(const CameraPtr& camera);
 	CameraPtr getCamera() const { return mCamera; }
@@ -40,16 +35,20 @@ public:
 	osg::ref_ptr<osg::Camera> getOsgCamera() const { return mOsgCamera; }
 
 protected:
-	virtual void updatePreRender();
+	void updatePreRender(const RenderContext& renderContext) override;
 
 protected:
+	RectF mRect;
 	osg::ref_ptr<osg::Camera> mOsgCamera;
 	osg::Viewport* mViewport;
 	CameraPtr mCamera;
-	std::shared_ptr<Scene> mScene;
+	osg::ref_ptr<osg::Node> mScene;
 	osg::Uniform* mRcpWindowSizeInPixelsUniform;
-	osg::Uniform* mFarClipDistanceUniform;
 };
+
+//! Render target that renders into the currently attached frame buffer,
+//!  which is usually the backbuffer unless the target exists under an osg::camera rendering into a different frame buffer.
+osg::ref_ptr<RenderTarget> createDefaultRenderTarget();
 
 } // namespace vis
 } // namespace skybolt

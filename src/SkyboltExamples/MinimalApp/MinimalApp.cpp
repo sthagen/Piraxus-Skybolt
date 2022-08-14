@@ -6,13 +6,14 @@
 
 #include <ExamplesCommon/HelpDisplaySystem.h>
 #include <ExamplesCommon/HelpDisplayToggleEventListener.h>
-#include <ExamplesCommon/WindowUtility.h>
+#include <ExamplesCommon/WindowUtil.h>
 
 #include <SkyboltEngine/CameraInputSystem.h>
 #include <SkyboltEngine/EngineCommandLineParser.h>
 #include <SkyboltEngine/EngineRoot.h>
 #include <SkyboltEngine/EngineRootFactory.h>
 #include <SkyboltEngine/EntityFactory.h>
+#include <SkyboltEngine/WindowUtil.h>
 #include <SkyboltEngine/Diagnostics/StatsDisplaySystem.h>
 #include <SkyboltEngine/Input/InputPlatformOsg.h>
 #include <SkyboltEngine/Input/InputSystem.h>
@@ -28,8 +29,8 @@
 
 #include <SkyboltVis/Camera.h>
 #include <SkyboltVis/Scene.h>
-#include <SkyboltVis/RenderTarget/Viewport.h>
-#include <SkyboltVis/RenderTarget/ViewportHelpers.h>
+#include <SkyboltVis/RenderOperation/RenderCameraViewport.h>
+#include <SkyboltVis/RenderOperation/RenderTarget.h>
 #include <SkyboltVis/Window/StandaloneWindow.h>
 
 #include <SkyboltCommon/Exception.h>
@@ -51,12 +52,7 @@ static void createEntities(const EntityFactory& entityFactory, World& world, Cam
 	cameraController.setTarget(planet.get());
 }
 
-static std::unique_ptr<StandaloneWindow> createWindow()
-{
-	return std::make_unique<StandaloneWindow>(RectI(0, 0, 1080, 720));
-}
-
-static std::shared_ptr<HelpDisplaySystem> createHelpDisplaySystem(const vis::Window& window)
+static std::shared_ptr<HelpDisplaySystem> createHelpDisplaySystem(const osg::ref_ptr<osg::Camera>& camera)
 {
 	std::string helpMessage =
 R"(= Controls =
@@ -64,10 +60,11 @@ W: Zoom in
 S: Zoom out
 H: Toggle help message
 Shift (hold): Camera tilt modifier
+Esc: Exit
 Mouse: Rotate camera
 )";
 
-	auto helpDisplaySystem = std::make_shared<HelpDisplaySystem>(window);
+	auto helpDisplaySystem = std::make_shared<HelpDisplaySystem>(camera);
 	helpDisplaySystem->setMessage(helpMessage);
 	return helpDisplaySystem;
 }
@@ -85,8 +82,8 @@ int main(int argc, char *argv[])
 		engineRoot->simWorld->addEntity(simCamera);
 
 		// Attach camera to window
-		std::unique_ptr<vis::StandaloneWindow> window = createWindow();
-		osg::ref_ptr<vis::RenderTarget> viewport = createAndAddViewportToWindowWithEngine(*window, *engineRoot);
+		std::unique_ptr<vis::StandaloneWindow> window = createExampleWindow();
+		osg::ref_ptr<vis::RenderCameraViewport> viewport = createAndAddViewportToWindowWithEngine(*window, *engineRoot);
 		viewport->setCamera(getVisCamera(*simCamera));
 
 		// Create input
@@ -97,7 +94,7 @@ int main(int argc, char *argv[])
 		engineRoot->systemRegistry->push_back(std::make_shared<InputSystem>(inputPlatform, window.get(), axes));
 		engineRoot->systemRegistry->push_back(std::make_shared<CameraInputSystem>(simCamera, inputPlatform, axes));
 
-		auto helpDisplaySystem = createHelpDisplaySystem(*window);
+		auto helpDisplaySystem = createHelpDisplaySystem(viewport->getFinalRenderTarget()->getOsgCamera());
 		engineRoot->systemRegistry->push_back(helpDisplaySystem);
 		auto helpDisplayToggleEventListener = std::make_shared<HelpDisplayToggleEventListener>(helpDisplaySystem);
 		inputPlatform->getEventEmitter()->addEventListener<KeyEvent>(helpDisplayToggleEventListener.get());

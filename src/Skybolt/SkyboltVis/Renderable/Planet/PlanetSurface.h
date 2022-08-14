@@ -21,8 +21,6 @@
 #include <osg/Program>
 #include <osg/Texture2D>
 
-#include <boost/optional.hpp>
-
 namespace skybolt {
 namespace vis {
 
@@ -67,7 +65,7 @@ public:
 	PlanetSurface(const PlanetSurfaceConfig& config);
 	~PlanetSurface();
 
-	void updatePreRender(const RenderContext& context);
+	void updatePreRender(const CameraRenderContext& context);
 
 	skybolt::Listenable<QuadTreeTileLoaderListener>* getTileLoaderListenable() const { return mTileSource.get(); }
 

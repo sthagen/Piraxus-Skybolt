@@ -25,15 +25,16 @@ class CascadedShadowMapGenerator
 public:
 	CascadedShadowMapGenerator(const CascadedShadowMapGeneratorConfig& config);
 
+	//! @param lightDirection is the direction to the light
 	void update(const vis::Camera& viewCamera, const osg::Vec3& lightDirection, const osg::Vec3& wrappedNoiseOrigin);
 
 	void configureShadowReceiverStateSet(osg::StateSet& ss);
 
 	std::vector<osg::ref_ptr<osg::Texture2D>> getTextures() const { return mTextures; }
 
-	osg::ref_ptr<osg::Camera> getCamera(int cascadeIndex) const;
+	std::vector<osg::ref_ptr<ShadowMapGenerator>> getGenerators() const { return mShadowMapGenerators; }
 
-	int getCascadeCount() const { return int(mShadowMapGenerators.size()); }
+	void setScene(const osg::ref_ptr<osg::Node>& scene);
 
 	static osg::Vec4 calculateCascadeToCascadeTransform(const osg::Matrix m0, const osg::Matrix m1);
 
@@ -58,7 +59,7 @@ private:
 
 private:
 	std::vector<osg::ref_ptr<osg::Texture2D>> mTextures;
-	std::vector<std::shared_ptr<class ShadowMapGenerator>> mShadowMapGenerators;
+	std::vector<osg::ref_ptr<ShadowMapGenerator>> mShadowMapGenerators;
 	std::vector<float> mCascadeBoundingDistances;
 
 	//! Vec4f array. Stores a Vec4f for each cascade with values [scaleXY, offsetX, offsetY, offsetZ] relative to the first cascade.

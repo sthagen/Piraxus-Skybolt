@@ -12,7 +12,6 @@
 #include "SkyboltVis/OsgStateSetHelpers.h"
 #include "SkyboltVis/OsgTextureHelpers.h"
 #include "SkyboltVis/RenderContext.h"
-#include "SkyboltVis/TextureGenerator/TextureGeneratorCameraFactory.h"
 
 #include <osg/CullFace>
 #include <osg/Geode>
@@ -125,51 +124,13 @@ static osg::StateSet* createStateSet(const osg::ref_ptr<osg::Program>& program, 
 		stateSet->setTextureAttributeAndModes(unit, texture);
 		stateSet->addUniform(createUniformSampler3d("noiseVolumeSampler", unit++));
 	}
+	stateSet->addUniform(uniforms.upscaleFactor);
 
 	return stateSet;
 }
 
-static osg::ref_ptr<osg::Texture2D> createCloudColorTexture(int width, int height)
-{
-	osg::ref_ptr<osg::Texture2D> texture = createRenderTexture(width, height);
-	texture->setResizeNonPowerOfTwoHint(false);
-	texture->setInternalFormat(GL_RGBA);
-	texture->setFilter(osg::Texture2D::FilterParameter::MIN_FILTER, osg::Texture2D::FilterMode::LINEAR);
-	texture->setFilter(osg::Texture2D::FilterParameter::MAG_FILTER, osg::Texture2D::FilterMode::LINEAR);
-	texture->setNumMipmapLevels(0);
-	texture->setWrap(osg::Texture::WRAP_S, osg::Texture::CLAMP_TO_EDGE);
-	texture->setWrap(osg::Texture::WRAP_T, osg::Texture::CLAMP_TO_EDGE);
-
-	return texture;
-}
-
-static osg::ref_ptr<osg::Texture2D> createCloudDepthTexture(int width, int height)
-{
-	osg::ref_ptr<osg::Texture2D> texture = createRenderTexture(width, height);
-	texture->setResizeNonPowerOfTwoHint(false);
-	texture->setInternalFormat(GL_R32F);
-	texture->setFilter(osg::Texture2D::FilterParameter::MIN_FILTER, osg::Texture2D::FilterMode::LINEAR);
-	texture->setFilter(osg::Texture2D::FilterParameter::MAG_FILTER, osg::Texture2D::FilterMode::LINEAR);
-	texture->setNumMipmapLevels(0);
-	texture->setWrap(osg::Texture::WRAP_S, osg::Texture::CLAMP_TO_EDGE);
-	texture->setWrap(osg::Texture::WRAP_T, osg::Texture::CLAMP_TO_EDGE);
-
-	return texture;
-}
-
-static osg::StateSet* createTexturedQuadStateSet(osg::ref_ptr<osg::Program> program, osg::ref_ptr<osg::Texture2D> colorTexture, osg::ref_ptr<osg::Texture2D> depthTexture)
-{
-	osg::StateSet* stateSet = new osg::StateSet();
-	stateSet->setAttributeAndModes(program, osg::StateAttribute::ON);
-	stateSet->setTextureAttributeAndModes(0, colorTexture, osg::StateAttribute::ON);
-	stateSet->setTextureAttributeAndModes(1, depthTexture, osg::StateAttribute::ON);
-	stateSet->addUniform(createUniformSampler2d("colorTexture", 0));
-	stateSet->addUniform(createUniformSampler2d("depthTexture", 1));
-	stateSet->setMode(GL_CULL_FACE, osg::StateAttribute::OFF);
-	return stateSet;
-}
-
-VolumeClouds::VolumeClouds(const VolumeCloudsConfig& config)
+VolumeClouds::VolumeClouds(const VolumeCloudsConfig& config) :
+	mApplyTemporalUpscalingJitter(config.applyTemporalUpscalingJitter)
 {
 	mGeode = new osg::Geode();
 	mGeode->setCullingActive(false);
@@ -180,6 +141,10 @@ VolumeClouds::VolumeClouds(const VolumeCloudsConfig& config)
 	mUniforms.bottomLeftDir = new osg::Uniform("bottomLeftDir", osg::Vec3f(0, 0, 0));
 	mUniforms.bottomRightDir = new osg::Uniform("bottomRightDir", osg::Vec3f(0, 0, 0));
 
+	// Specifies how much we need to increase texture LOD to account for upscaling.
+	// Although the upscaling factor is 4x we use a factor of 3x here to prevent excessive jittering.
+	mUniforms.upscaleFactor = new osg::Uniform("upscaleTextureLodFactor", mApplyTemporalUpscalingJitter ? 3.f : 1.f);
+
 	osg::StateSet* stateSet = createStateSet(config.program, mUniforms, config.cloudsTexture);
 
 	osg::Vec2f pos(0,0);
@@ -187,37 +152,40 @@ VolumeClouds::VolumeClouds(const VolumeCloudsConfig& config)
 
 	static osg::ref_ptr<osg::Geometry> quad = createQuadWithUvs(BoundingBox2f(pos, size), QuadUpDirectionY);
 	quad->setCullingActive(false);
-
-#define COMPOSITE_CLOUDS
-#ifdef COMPOSITE_CLOUDS
-	// TODO: fit to window dimensions
-	int width = 512;
-	int height = 256;
-	mColorTexture = createCloudColorTexture(width, height);
-	osg::ref_ptr<osg::Texture2D> depthTexture = createCloudDepthTexture(width, height);
-	
-	TextureGeneratorCameraFactory factory;
-	osg::ref_ptr<osg::Camera> camera = factory.createCameraWithQuad({ mColorTexture, depthTexture }, stateSet, /* clear */ false);
-	mTransform->addChild(camera);
-
-	osg::StateSet* texturedQuadStateSet = createTexturedQuadStateSet(config.compositorProgram, mColorTexture, depthTexture);
-	makeStateSetTransparent(*texturedQuadStateSet, vis::TransparencyMode::PremultipliedAlpha, RenderBinId::Clouds);
-
-	mGeode->setStateSet(texturedQuadStateSet);
-#else
-	makeStateSetTransparent(*stateSet, vis::TransparencyMode::PremultipliedAlpha);
-	mGeode->setStateSet(stateSet);
-#endif
-	mGeode->addDrawable(quad);
-	mTransform->addChild(mGeode);
+	quad->setStateSet(stateSet);
+	mTransform->addChild(quad);
 }
 
 VolumeClouds::~VolumeClouds()
 {
-	mTransform->removeChild(mGeode);
 }
 
-void VolumeClouds::updatePreRender(const RenderContext& context)
+// From https://en.wikipedia.org/wiki/Ordered_dithering
+const int bayerIndex[] = {
+    0, 8, 2, 10,
+    12, 4, 14, 6,
+    3, 11, 1, 9,
+	15, 7, 13, 5
+};
+
+const std::vector<osg::Vec2f> calcBayerOffsets(const int* bayerIndices)
+{
+	std::vector<osg::Vec2f> r;
+	for (int i = 0; i < 16; ++i)
+	{
+		for (int j = 0; j < 16; ++j)
+		{
+			if (bayerIndices[j] == i)
+			{
+				r.push_back(osg::Vec2f((float(j % 4) + 0.5f) / 4.0f, (float(j / 4) + 0.5f) / 4.0f));
+				break;
+			}
+		}
+	}
+	return r;
+};
+
+void VolumeClouds::updatePreRender(const CameraRenderContext& context)
 {
 	osg::Matrixf modelMatrix = mTransform->getWorldMatrices().front();
 	mUniforms.modelMatrixUniform->set(modelMatrix);
@@ -227,7 +195,23 @@ void VolumeClouds::updatePreRender(const RenderContext& context)
 	{
 		osg::Vec3f cameraPosition = camera.getPosition();
 
-		osg::Matrixf viewProj = camera.getViewMatrix() * camera.getProjectionMatrix();
+		osg::Matrix proj = camera.getProjectionMatrix();
+
+
+		if (mApplyTemporalUpscalingJitter)
+		{
+			mFrameNumber = (mFrameNumber + 1) % (16);
+
+			static std::vector<osg::Vec2f> bayerOffset = calcBayerOffsets(bayerIndex);
+
+			mJitterOffset = osg::Vec2(
+				(bayerOffset[(mFrameNumber)].x() - 0.5f) / float(context.targetDimensions.x()) * 4.f,
+				(bayerOffset[(mFrameNumber)].y() - 0.5f) / float(context.targetDimensions.y()) * 4.f);
+			proj(2, 0) += mJitterOffset.x() * 2.f;
+			proj(2, 1) += mJitterOffset.y() * 2.f;
+		}
+
+		osg::Matrixf viewProj = camera.getViewMatrix() * proj;
 		osg::Matrixf viewProjInv = osg::Matrix::inverse(viewProj);
 
 		osg::Vec4f c00 = osg::Vec4f(-1, -1, 0.5f, 1.0f) * viewProjInv;
@@ -253,4 +237,9 @@ void VolumeClouds::updatePreRender(const RenderContext& context)
 		mUniforms.bottomLeftDir->set(dir01);
 		mUniforms.bottomRightDir->set(dir11);
 	}
+}
+
+osg::Matrix VolumeClouds::getModelMatrix() const
+{
+	return mTransform->getWorldMatrices().front();
 }

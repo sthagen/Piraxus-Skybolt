@@ -25,6 +25,9 @@ nlohmann::json createDefaultEngineSettings()
 		"enabled": true,
 		"textureSize": 2048,
 		"cascadeBoundingDistances": [0.02, 20.0, 70.0, 250.0, 7000]
+	},
+	"clouds": {
+		"enableTemporalUpscaling": true
 	}
 })"_json;
 }
@@ -47,6 +50,36 @@ vis::DisplaySettings getDisplaySettingsFromEngineSettings(const nlohmann::json& 
 		readOptionalToVar(j, "multiSampleCount", s.multiSampleCount);
 	}
 	return s;
+}
+
+std::optional<vis::ShadowParams> getShadowParams(const nlohmann::json& engineSettings)
+{
+	auto i = engineSettings.find("shadows");
+	if (i != engineSettings.end())
+	{
+		if (readOptionalOrDefault<bool>(i.value(), "enabled", true))
+		{
+			vis::ShadowParams params;
+			params.cascadeBoundingDistances = readOptionalVector<float>(i.value(), "cascadeBoundingDistances", {0, 50, 200, 600, 2000});
+			params.textureSize = readOptionalOrDefault<int>(i.value(), "textureSize", 1024);
+
+			return params;
+		}
+	}
+	return {};
+}
+
+vis::CloudRenderingParams getCloudRenderingParams(const nlohmann::json& engineSettings)
+{
+	vis::CloudRenderingParams params;
+	params.enableTemporalUpscaling = true;
+
+	auto i = engineSettings.find("clouds");
+	if (i != engineSettings.end())
+	{
+		params.enableTemporalUpscaling = readOptionalOrDefault<bool>(i.value(), "enableTemporalUpscaling", true);
+	}
+	return params;
 }
 
 } // namespace skybolt

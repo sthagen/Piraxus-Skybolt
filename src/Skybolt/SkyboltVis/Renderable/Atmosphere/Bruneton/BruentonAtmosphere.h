@@ -47,26 +47,29 @@ struct BruentonAtmosphereConfig
 	bool useEarthOzone = true;
 };
 
-class BruentonAtmosphere : public VisObject
+class BruentonAtmosphere : public osg::Group
 {
+	friend class BruentonAtmosphereDrawCallback;
 public:
 	BruentonAtmosphere(const BruentonAtmosphereConfig& config);
 	~BruentonAtmosphere();
 
 	const osg::ref_ptr<osg::Texture>& getTransmittanceTexture() const;
 	const osg::ref_ptr<osg::Texture>& getScatteringTexture() const;
+	const osg::ref_ptr<osg::Texture>& getIrradianceTexture() const;
+
+	osg::ref_ptr<osg::StateSet> getStateSet() const { return mStateSet; }
 
 	static osg::Vec3f getSolarIrradiance();
 
-protected:
-	void updatePreRender(const RenderContext& context) override;
-	osg::Node* _getNode() const override { return mGroup; }
-
 private:
+	osg::ref_ptr<osg::StateSet> mStateSet;
 	osg::ref_ptr<BruentonAtmosphereGenerator> mGenerator;
-	osg::ref_ptr<osg::Group> mGroup;
 	std::vector<osg::ref_ptr<osg::Uniform>> mUniforms;
-	bool mGenerated = false;
+
+	osg::ref_ptr<osg::Texture> mTransmittanceTexture;
+	osg::ref_ptr<osg::Texture> mScatteringTexture;
+	osg::ref_ptr<osg::Texture> mIrradianceTexture;
 };
 
 } // namespace vis

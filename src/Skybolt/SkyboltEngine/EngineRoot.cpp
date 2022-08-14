@@ -106,7 +106,8 @@ EngineRoot::EngineRoot(const EngineRootConfig& config) :
 	scheduler(new px_sched::Scheduler),
 	fileLocator(locateFile),
 	simWorld(std::make_unique<sim::World>()),
-	namedObjectRegistry(std::make_shared<sim::NamedObjectRegistry>())
+	namedObjectRegistry(std::make_shared<sim::NamedObjectRegistry>()),
+	engineSettings(config.engineSettings)
 {
 	int threadCount = determineThreadCountFromHardwareAndUserLimits();
 
@@ -155,7 +156,7 @@ EngineRoot::EngineRoot(const EngineRootConfig& config) :
 	}
 
 	programs = vis::createShaderPrograms();
-	scene.reset(new vis::Scene);
+	scene.reset(new vis::Scene(new osg::StateSet()));
 
 	Scenario* scenarioPtr = &scenario;
 	julianDateProvider = [=]() {
@@ -186,8 +187,8 @@ EngineRoot::EngineRoot(const EngineRootConfig& config) :
 	context.modelFactory = createModelFactory(programs);
 	context.fileLocator = locateFile;
 	context.assetPackagePaths = mAssetPackagePaths;
-	context.engineSettings = config.engineSettings;
 	context.textureCache = std::make_shared<vis::TextureCache>();
+	context.engineSettings = engineSettings;
 
 	file::Paths paths = getFilesWithExtensionInDirectoryInAssetPackages(mAssetPackagePaths, "Entities", ".json");
 	entityFactory.reset(new EntityFactory(context, paths));

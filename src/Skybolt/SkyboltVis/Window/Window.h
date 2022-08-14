@@ -8,7 +8,7 @@
 #pragma once
 
 #include "SkyboltVis/SkyboltVisFwd.h"
-#include "SkyboltVis/RenderTarget/Viewport.h"
+#include "SkyboltVis/RenderOperation/RenderOperationSequence.h"
 
 #include <osgViewer/Viewer>
 #include <set>
@@ -31,31 +31,19 @@ public:
 	osgViewer::Viewer& getViewer() const { return *mViewer; }
 	std::weak_ptr<osgViewer::Viewer> getViewerPtr() const {return mViewer;}
 
-	//! @param rect is dimensions normalized by parent window dimensions. Range is [0, 1]
-	void addRenderTarget(const osg::ref_ptr<RenderTarget>& target, const RectF& rect);
-	void removeRenderTarget(const osg::ref_ptr<RenderTarget>& target);
-
-	struct Target
-	{
-		Target(const osg::ref_ptr<RenderTarget>& target, const RectF& rect) : target(target), rect(rect) {}
-		osg::ref_ptr<RenderTarget> target;
-		RectF rect;
-	};
-
-	const std::vector<Target>& getRenderTargets() const { return mTargets; }
+	RenderOperationSequence& getRenderOperationSequence() { return *mRenderOperationSequence; }
+	const RenderOperationSequence& getRenderOperationSequence() const { return *mRenderOperationSequence; }
 
 protected:
 	void configureGraphicsState();
-	osg::Group* getSceneGraphRoot() const;
 
 protected:
 	std::shared_ptr<osgViewer::Viewer> mViewer;
 
 private:
-	CameraPtr mCamera;
+	osg::ref_ptr<osg::Group> mRootGroup;
+	std::unique_ptr<RenderOperationSequence> mRenderOperationSequence;
 	osg::Uniform* mScreenSizePixelsUniform;
-
-	std::vector<Target> mTargets;
 };
 
 } // namespace vis

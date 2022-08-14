@@ -8,7 +8,8 @@
 #include "DisplaySettings.h"
 #include "SkyboltVis/Camera.h"
 #include "SkyboltVis/OsgLogHandler.h"
-#include "SkyboltVis/RenderTarget/RenderTarget.h"
+#include "SkyboltVis/RenderContext.h"
+#include "SkyboltVis/RenderOperation/RenderTarget.h"
 
 #include <boost/foreach.hpp>
 
@@ -23,31 +24,38 @@ USE_OSGPLUGIN(jpeg)
 USE_OSGPLUGIN(png)
 USE_OSGPLUGIN(tga)
 
+USE_OSGPLUGIN(osg2)
+USE_SERIALIZER_WRAPPER_LIBRARY(osg)
+
 // include the platform specific GraphicsWindow implementation
 USE_GRAPHICSWINDOW()
 #endif
 
-using namespace skybolt::vis;
+namespace skybolt {
+namespace vis {
 
 Window::Window(const DisplaySettings& settings) :
-	mViewer(new osgViewer::Viewer)
+	mViewer(new osgViewer::Viewer),
+	mRootGroup(new osg::Group),
+	mRenderOperationSequence(std::make_unique<RenderOperationSequence>())
 {
+	mRootGroup->addChild(mRenderOperationSequence->getRootNode());
+
 	forwardOsgLogToBoost();
 
 	osg::DisplaySettings::instance()->setNumMultiSamples(settings.multiSampleCount);
 
 	osg::setNotifyLevel(osg::WARN);
+	mViewer->setKeyEventSetsDone(0); // disable default 'escape' key binding to quit the application
 	mViewer->setThreadingModel(osgViewer::ViewerBase::SingleThreaded); // TODO: Use multi-threaded?
 
-	osg::Group* rootGroup = new osg::Group;
-
-	osg::StateSet* stateSet = rootGroup->getOrCreateStateSet();
+	osg::StateSet* stateSet = mRootGroup->getOrCreateStateSet();
 	// We will write to the frame buffer in linear light space, and it will automatically convert to SRGB
 	stateSet->setMode(GL_FRAMEBUFFER_SRGB, osg::StateAttribute::ON);
 
 	stateSet->setMode(GL_CULL_FACE, osg::StateAttribute::ON);
 
-	mViewer->setSceneData(osg::ref_ptr<osg::Node>(rootGroup));
+	mViewer->setSceneData(osg::ref_ptr<osg::Node>(mRootGroup));
 
 	mScreenSizePixelsUniform = new osg::Uniform("screenSizePixels", osg::Vec2f(0, 0));
 	stateSet->addUniform(mScreenSizePixelsUniform);
@@ -59,38 +67,15 @@ Window::~Window()
 
 bool Window::render()
 {
-	for (const auto& item : mTargets)
-	{
-		const RectF& rectF = item.rect;
-		RectI rect(getWidth() * rectF.x, getHeight() * rectF.y, getWidth() * rectF.width, getHeight() * rectF.height);
-		item.target->setRect(rect);
-	}
-
 	mScreenSizePixelsUniform->set(osg::Vec2f(getWidth(), getHeight()));
+
+	RenderContext context;
+	context.targetDimensions = osg::Vec2i(getWidth(), getHeight());
+	mRenderOperationSequence->updatePreRender(context);
+
 	mViewer->frame();
 
 	return !mViewer->done();
-}
-
-void Window::addRenderTarget(const osg::ref_ptr<RenderTarget>& target, const RectF& rect)
-{
-	mTargets.push_back(Target(target, rect));
-	getSceneGraphRoot()->addChild(target);
-}
-
-void Window::removeRenderTarget(const osg::ref_ptr<RenderTarget>& target)
-{
-	getSceneGraphRoot()->removeChild(target);
-	for (auto i = mTargets.begin(); i < mTargets.end(); ++i)
-	{
-		mTargets.erase(i);
-		break;
-	}
-}
-
-osg::Group* Window::getSceneGraphRoot() const
-{
-	return mViewer->getSceneData()->asGroup();
 }
 
 void Window::configureGraphicsState()
@@ -110,3 +95,6 @@ void Window::configureGraphicsState()
 	// Enable to debug OpenGL.
 	state->setCheckForGLErrors(osg::State::NEVER_CHECK_GL_ERRORS);
 }
+
+} // namespace vis
+} // namespace skybolt

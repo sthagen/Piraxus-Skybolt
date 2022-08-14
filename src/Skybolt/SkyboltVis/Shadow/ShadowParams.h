@@ -4,17 +4,18 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-
 #pragma once
 
-#include "SkyboltVis/SkyboltVisFwd.h"
-
-#include <osg/Camera>
+#include <vector>
 
 namespace skybolt {
 namespace vis {
 
-osg::ref_ptr<RenderTarget> createAndAddViewportToWindow(Window& window, const osg::ref_ptr<osg::Program>& compositorProgram);
+struct ShadowParams
+{
+	int textureSize;
+	std::vector<float> cascadeBoundingDistances;
+};
 
 } // namespace vis
 } // namespace skybolt

@@ -17,18 +17,23 @@
 namespace skybolt {
 namespace vis {
 
-class Scene : public VisObject
+class Scene
 {
 public:
-	Scene();
+	Scene(const osg::ref_ptr<osg::StateSet>& stateSet);
 	~Scene();
 
-	// @param object can be added to multiple scenes
-	void addObject(VisObject* object);
-	void removeObject(VisObject* object);
+	enum class Bucket
+	{
+		Default,
+		Clouds,
+		BucketCount
+	};
 
-	void addClipPlane(osg::ClipPlane* plane);
-	void removeClipPlane(osg::ClipPlane* plane);
+	// @param object can be added to multiple scenes.
+	// Object cannot exist in multiple buckets.
+	void addObject(const VisObjectPtr& object, Bucket bucket = Bucket::Default);
+	void removeObject(const VisObjectPtr& object);
 
 	//! @returns the direction the primary light is shining
 	osg::Vec3f getPrimaryLightDirection() const;
@@ -36,6 +41,7 @@ public:
 
 	void translateNoiseOrigin(const osg::Vec3f& offset);
 
+	Planet* getPrimaryPlanet() const { return mPrimaryPlanet; }
 	float calcAtmosphericDensity(const osg::Vec3f& position) const;
 
 	osg::Vec3f getAmbientLightColor() const;
@@ -43,23 +49,26 @@ public:
 
 	const osg::Vec3& getWrappedNoiseOrigin() const {return mWrappedNoiseOrigin;}
 
-	osg::Group* _getGroup() const {return mGroup;} //!< Node under the root containing the scene objects
+	osg::Group* getBucketGroup(Bucket bucket) const;
 
-public: // VisObject interface
-	void updatePreRender(const RenderContext& context);
-	osg::Node* _getNode() const override {return mClipNode;} //!< The root node
+	void updatePreRender(const CameraRenderContext& context);
+
+	osg::ref_ptr<osg::StateSet> getStateSet() const { return mStateSet; }
 
 private:
-	std::vector<VisObject*> mObjects;
-	osg::ref_ptr<osg::Group> mGroup;
-	osg::ref_ptr<osg::ClipNode> mClipNode;
+	osg::ref_ptr<osg::StateSet> mStateSet;
+
+	std::map<VisObjectPtr, Bucket> mObjects;
+	std::vector<osg::ref_ptr<osg::Group>> mBucketGroups;
 	Light* mPrimaryLight;
 	Planet* mPrimaryPlanet;
+
 	osg::Uniform* mCameraPositionUniform;
 	osg::Uniform* mViewCameraPositionUniform; //!< Position of final view camera. Useful for getting view camera info in render targets other than the main view.
 	osg::Uniform* mCameraCenterDirectionUniform;
 	osg::Uniform* mCameraUpDirectionUniform;
 	osg::Uniform* mCameraRightDirectionUniform;
+	osg::Uniform* mFarClipDistanceUniform;
 	osg::Uniform* mViewMatrixUniform;
 	osg::Uniform* mViewProjectionMatrixUniform;
 	osg::Uniform* mProjectionMatrixUniform;
