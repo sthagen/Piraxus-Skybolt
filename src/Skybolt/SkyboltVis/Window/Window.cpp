@@ -34,11 +34,12 @@ USE_GRAPHICSWINDOW()
 namespace skybolt {
 namespace vis {
 
-Window::Window(const DisplaySettings& settings) :
-	mViewer(new osgViewer::Viewer),
+Window::Window(std::unique_ptr<osgViewer::Viewer> viewer, const DisplaySettings& settings) :
+	mViewer(std::move(viewer)),
 	mRootGroup(new osg::Group),
 	mRenderOperationSequence(std::make_unique<RenderOperationSequence>())
 {
+	assert(mViewer);
 	mRootGroup->addChild(mRenderOperationSequence->getRootNode());
 
 	forwardOsgLogToBoost();
@@ -65,12 +66,13 @@ Window::~Window()
 {
 }
 
-bool Window::render()
+bool Window::render(LoadTimingPolicy loadTimingPolicy)
 {
 	mScreenSizePixelsUniform->set(osg::Vec2f(getWidth(), getHeight()));
 
 	RenderContext context;
 	context.targetDimensions = osg::Vec2i(getWidth(), getHeight());
+	context.loadTimingPolicy = loadTimingPolicy;
 	mRenderOperationSequence->updatePreRender(context);
 
 	mViewer->frame();

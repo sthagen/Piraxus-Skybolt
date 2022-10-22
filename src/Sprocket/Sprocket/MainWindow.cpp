@@ -81,13 +81,14 @@
 #include <filesystem>
 #include <boost/log/trivial.hpp>
 
-#include <qabstracttoolwindowmanagerarea.h>
+#include <ToolWindowManager/ToolWindowManagerArea.h>
 
 #include <QApplication>
 #include <QBoxLayout>
 #include <QCloseEvent>
 #include <QComboBox>
 #include <QFileDialog>
+#include <QJsonArray>
 #include <QJsonDocument>
 #include <QMessageBox>
 #include <QPushButton>
@@ -99,6 +100,7 @@
 #include <osgDB/Registry>
 
 #include <algorithm>
+#include <chrono>
 #include <deque>
 #include <sstream>
 
@@ -158,7 +160,7 @@ public:
 	}
 };
 
-static const QString defaultWindowLayoutState = "AAAACAAAAAADAAAAFgBtAGEAaQBuAFcAcgBhAHAAcABlAHIAAAAIAAAAAAIAAAAQAHMAcABsAGkAdAB0AGUAcgAAAAgAAAAAAwAAAAgAdAB5AHAAZQAAAAoAAAAAEABzAHAAbABpAHQAdABlAHIAAAAKAHMAdABhAHQAZQAAAAwAAAAAHwAAAP8AAAABAAAAAgAAANUAAAVmAP////8BAAAAAQAAAAAKAGkAdABlAG0AcwAAAAkAAAAAAgAAAAgAAAAAAwAAAAgAdAB5AHAAZQAAAAoAAAAACABhAHIAZQBhAAAAFgBvAGIAagBlAGMAdABOAGEAbQBlAHMAAAALAAAAAAEAAAAQAEUAeABwAGwAbwByAGUAcgAAABQAYwB1AHMAdABvAG0ARABhAHQAYQAAAAgAAAAAAQAAABgAYwB1AHIAcgBlAG4AdABJAG4AZABlAHgAAAACAAAAAAAAAAAIAAAAAAMAAAAIAHQAeQBwAGUAAAAKAAAAABAAcwBwAGwAaQB0AHQAZQByAAAACgBzAHQAYQB0AGUAAAAMAAAAABsAAAD/AAAAAQAAAAEAAAQBAP////8BAAAAAgAAAAAKAGkAdABlAG0AcwAAAAkAAAAAAQAAAAgAAAAAAwAAAAgAdAB5AHAAZQAAAAoAAAAAEABzAHAAbABpAHQAdABlAHIAAAAKAHMAdABhAHQAZQAAAAwAAAAAIwAAAP8AAAABAAAAAwAAAdcAAAJmAAABAQD/////AQAAAAEAAAAACgBpAHQAZQBtAHMAAAAJAAAAAAMAAAAIAAAAAAMAAAAIAHQAeQBwAGUAAAAKAAAAAAgAYQByAGUAYQAAABYAbwBiAGoAZQBjAHQATgBhAG0AZQBzAAAACwAAAAACAAAAEABWAGkAZQB3AHAAbwByAHQAAAAIAFAAbABvAHQAAAAUAGMAdQBzAHQAbwBtAEQAYQB0AGEAAAAIAAAAAAEAAAAYAGMAdQByAHIAZQBuAHQASQBuAGQAZQB4AAAAAgAAAAAAAAAACAAAAAADAAAACAB0AHkAcABlAAAACgAAAAAIAGEAcgBlAGEAAAAWAG8AYgBqAGUAYwB0AE4AYQBtAGUAcwAAAAsAAAAAAQAAAAgARgBsAG8AdwAAABQAYwB1AHMAdABvAG0ARABhAHQAYQAAAAgAAAAAAQAAABgAYwB1AHIAcgBlAG4AdABJAG4AZABlAHgAAAACAAAAAAAAAAAIAAAAAAMAAAAIAHQAeQBwAGUAAAAKAAAAAAgAYQByAGUAYQAAABYAbwBiAGoAZQBjAHQATgBhAG0AZQBzAAAACwAAAAABAAAAFABQAHIAbwBwAGUAcgB0AGkAZQBzAAAAFABjAHUAcwB0AG8AbQBEAGEAdABhAAAACAAAAAABAAAAGABjAHUAcgByAGUAbgB0AEkAbgBkAGUAeAAAAAIAAAAAAAAAABAAZwBlAG8AbQBlAHQAcgB5AAAADAAAAAAyAdnQywACAAAAAAAAAAAAAAAABj8AAAMbAAAAAAAAAAAAAAY/AAADGwAAAAAAAAAABkAAAAAeAGYAbABvAGEAdABpAG4AZwBXAGkAbgBkAG8AdwBzAAAACQAAAAAAAAAAOgBRAFQAbwBvAGwAVwBpAG4AZABvAHcATQBhAG4AYQBnAGUAcgBTAHQAYQB0AGUARgBvAHIAbQBhAHQAAAACAAAAAAE=";
+static const QString defaultWindowLayoutState = "AAAAAwAAADgAdABvAG8AbABXAGkAbgBkAG8AdwBNAGEAbgBhAGcAZQByAFMAdABhAHQAZQBGAG8AcgBtAGEAdAAAAAIAAAAAAQAAABYAbQBhAGkAbgBXAHIAYQBwAHAAZQByAAAACAAAAAACAAAAEABzAHAAbABpAHQAdABlAHIAAAAIAAAAAAMAAAAIAHQAeQBwAGUAAAAKAAAAABAAcwBwAGwAaQB0AHQAZQByAAAACgBzAHQAYQB0AGUAAAAKAAAAAFgAQQBBAEEAQQAvAHcAQQBBAEEAQQBFAEEAQQBBAEEAQwBBAEEAQQBBAC8AdwBBAEEAQgBuAGMAQQAvAC8ALwAvAC8AdwBFAEEAQQBBAEEAQgBBAEEAPQA9AAAACgBpAHQAZQBtAHMAAAAJAAAAAAIAAAAIAAAAAAMAAAAIAHQAeQBwAGUAAAAKAAAAAAgAYQByAGUAYQAAAA4AbwBiAGoAZQBjAHQAcwAAAAkAAAAAAgAAAAgAAAAAAgAAAAgAbgBhAG0AZQAAAAoAAAAAEABFAHgAcABsAG8AcgBlAHIAAAAIAGQAYQB0AGEAAAAAAQAAAAgAAAAAAgAAAAgAbgBhAG0AZQAAAAoAAAAAIgBFAG4AdABpAHQAeQAgAEMAbwBuAHQAcgBvAGwAbABlAHIAAAAIAGQAYQB0AGEAAAAAAQAAABgAYwB1AHIAcgBlAG4AdABJAG4AZABlAHgAAAACAAAAAAAAAAAIAAAAAAMAAAAIAHQAeQBwAGUAAAAKAAAAABAAcwBwAGwAaQB0AHQAZQByAAAACgBzAHQAYQB0AGUAAAAKAAAAAFgAQQBBAEEAQQAvAHcAQQBBAEEAQQBFAEEAQQBBAEEAQwBBAEEAQQBGAEwAUQBBAEEAQQBVAEEAQQAvAC8ALwAvAC8AdwBFAEEAQQBBAEEAQgBBAEEAPQA9AAAACgBpAHQAZQBtAHMAAAAJAAAAAAIAAAAIAAAAAAMAAAAIAHQAeQBwAGUAAAAKAAAAAAgAYQByAGUAYQAAAA4AbwBiAGoAZQBjAHQAcwAAAAkAAAAAAQAAAAgAAAAAAgAAAAgAbgBhAG0AZQAAAAoAAAAAEABWAGkAZQB3AHAAbwByAHQAAAAIAGQAYQB0AGEAAAAAAQAAABgAYwB1AHIAcgBlAG4AdABJAG4AZABlAHgAAAACAAAAAAAAAAAIAAAAAAMAAAAIAHQAeQBwAGUAAAAKAAAAAAgAYQByAGUAYQAAAA4AbwBiAGoAZQBjAHQAcwAAAAkAAAAAAQAAAAgAAAAAAgAAAAgAbgBhAG0AZQAAAAoAAAAAFABQAHIAbwBwAGUAcgB0AGkAZQBzAAAACABkAGEAdABhAAAAAAEAAAAYAGMAdQByAHIAZQBuAHQASQBuAGQAZQB4AAAAAgAAAAAAAAAAEABnAGUAbwBtAGUAdAByAHkAAAAKAAAAALAAQQBkAG4AUQB5AHcAQQBEAEEAQQBBAEEAQQBBAEEAQQBBAEEAQQBBAEEAQQBBAEEAQgAzADgAQQBBAEEAUABNAEEAQQBBAEEAQQBBAEEAQQBBAEEAQQBBAEEAQQBkAC8AQQBBAEEARAB6AEEAQQBBAEEAQQBBAEEAQQBBAEEAQQBCADQAQQBBAEEAQQBBAEEAQQBBAEEAQQBBAEEAQQBBAEIAMwA4AEEAQQBBAFAATQAAAB4AZgBsAG8AYQB0AGkAbgBnAFcAaQBuAGQAbwB3AHMAAAAJAAAAAAA=";
 
 class ViewportInput : public EventListener
 {
@@ -349,7 +351,7 @@ MainWindow::MainWindow(const std::vector<PluginFactory>& enginePluginFactories, 
 	mStatsDisplaySystem->setVisible(false);
 	mEngineRoot->systemRegistry->push_back(mStatsDisplaySystem);
 
-	mInputPlatform.reset(new InputPlatformOis(std::to_string(size_t(HWND(winId()))), 800, 600)); // TODO: use actual resolution
+	mInputPlatform.reset(new InputPlatformOis(std::to_string(size_t(winId())), 800, 600)); // TODO: use actual resolution
 	mViewportInput.reset(new ViewportInput(mInputPlatform));
 
 	mInputPlatform->getEventEmitter()->addEventListener<MouseEvent>(this);
@@ -396,7 +398,7 @@ MainWindow::MainWindow(const std::vector<PluginFactory>& enginePluginFactories, 
 		mForcesVisBinding.reset(new ForcesVisBinding(world, arrows));
 	}
 
-	mToolWindowManager = new QToolWindowManager(this);
+	mToolWindowManager = new ToolWindowManager(this);
 	// setup tool window manager
 	connect(mToolWindowManager, SIGNAL(toolWindowVisibilityChanged(QWidget*, bool)), this, SLOT(toolWindowVisibilityChanged(QWidget*, bool)));
 
@@ -540,8 +542,6 @@ MainWindow::~MainWindow()
 	mEngineRoot.reset();
 }
 
-boost::timer timer;
-double prevElapsedTime = 0;
 double minFrameDuration = 0.01;
 
 double latestSimTime = 0;
@@ -577,9 +577,8 @@ static QString addSeparator(const QString& str)
 
 void MainWindow::update()
 {
-	double elapsed = timer.elapsed();
-	float dt = (float)(elapsed - prevElapsedTime);
-	prevElapsedTime = elapsed;
+	double dt = double(mUpdateTimer.count<std::chrono::milliseconds>()) / 1000.0;
+	mUpdateTimer.start();
 
 	if (mInputPlatform) // TODO
 	{
@@ -659,8 +658,8 @@ void MainWindow::updateIfIntervalElapsed()
 {
 	QTimer::singleShot(0, this, SLOT(updateIfIntervalElapsed()));
 
-	double elapsed = timer.elapsed();
-	if (elapsed - prevElapsedTime < minFrameDuration)
+	double elapsed = double(mUpdateTimer.count<std::chrono::milliseconds>()) / 1000.0;
+	if (elapsed < minFrameDuration)
 	{
 		return;
 	}
@@ -822,12 +821,12 @@ QToolBar* MainWindow::createViewportToolBar()
 	return toolbar;
 }
 
-QVariant toVariant(QByteArray& array)
+static QVariantMap toVariantMap(const QByteArray& array)
 {
-	QVariant variant;
-	QDataStream stream(&array, QIODevice::OpenMode::enum_type::ReadOnly);
-	stream >> variant;
-	return variant;
+	QVariantMap variantMap;
+	QDataStream stream(const_cast<QByteArray*>(&array), QIODevice::OpenMode::enum_type::ReadOnly);
+	stream >> variantMap;
+	return variantMap;
 }
 
 #define FOREACH_CALL(container, fn, ...) \
@@ -842,7 +841,7 @@ void MainWindow::clearProject()
 
 	mSprocketModel->engineRoot->simWorld->removeAllEntities();
 
-	mToolWindowManager->restoreState(toVariant(QByteArray::fromBase64(defaultWindowLayoutState.toUtf8())));
+	mToolWindowManager->restoreState(toVariantMap(QByteArray::fromBase64(defaultWindowLayoutState.toUtf8())));
 }
 
 void createDefaultObjects(World& world, const EntityFactory& factory)
@@ -906,7 +905,7 @@ void MainWindow::open()
 	}
 }
 
-QByteArray toByteArray(const QVariant& variant)
+static QByteArray toByteArray(const QVariantMap& variant)
 {
 	QByteArray array;
 	QDataStream stream(&array, QIODevice::OpenMode::enum_type::WriteOnly);
@@ -952,7 +951,7 @@ void MainWindow::open(const QString& filename)
 		value = json["windows"];
 		if (!value.isUndefined())
 		{
-			mToolWindowManager->restoreState(toVariant(QByteArray::fromBase64(value.toString().toUtf8())));
+			mToolWindowManager->restoreState(toVariantMap(QByteArray::fromBase64(value.toString().toUtf8())));
 		}
 
 		value = json["entities"];
@@ -1246,21 +1245,21 @@ void MainWindow::addToolWindow(const QString& windowName, QWidget* window)
 	window->setObjectName(windowName);
 
 	QAction* action = ui->menuView->addAction(windowName);
-	action->setData(mToolActions.size());
+	action->setData((int)mToolActions.size());
 	action->setCheckable(true);
 	action->setChecked(true);
 	connect(action, SIGNAL(triggered(bool)), this, SLOT(toolWindowActionToggled(bool)));
 	mToolActions.push_back(action);
 
-	mToolWindowManager->addToolWindow(window, QToolWindowManager::LastUsedArea);
+	mToolWindowManager->addToolWindow(window, ToolWindowManager::LastUsedArea);
 }
 
 void MainWindow::raiseToolWindow(QWidget* widget)
 {
-	QAbstractToolWindowManagerArea* area = mToolWindowManager->areaFor(widget);
+	ToolWindowManagerArea* area = mToolWindowManager->areaOf(widget);
 	if (area)
 	{
-		area->activateToolWindow(widget);
+		area->activateWindow();
 	}
 }
 
@@ -1269,7 +1268,7 @@ void MainWindow::toolWindowActionToggled(bool state)
 	int index = static_cast<QAction*>(sender())->data().toInt();
 	QWidget *toolWindow = mToolWindowManager->toolWindows()[index];
 	// TODO: restore tool to previous location
-	mToolWindowManager->moveToolWindow(toolWindow, state ? QToolWindowManager::LastUsedArea : QToolWindowManager::NoArea);
+	mToolWindowManager->moveToolWindow(toolWindow, state ? ToolWindowManager::LastUsedArea : ToolWindowManager::NoArea);
 }
 
 void MainWindow::toolWindowVisibilityChanged(QWidget* toolWindow, bool visible)

@@ -13,10 +13,10 @@
 #include <SkyboltSim/SkyboltSimFwd.h>
 #include <SkyboltCommon/Event.h>
 #include <QMainWindow>
-#include <qtoolwindowmanager.h>
+#include <QSettings>
+#include <ToolWindowManager/ToolWindowManager.h>
 
-#include <boost/timer.hpp>
-#include <time.h>
+#include <cxxtimer/cxxtimer.hpp>
 
 class SprocketModel;
 class OsgWidget;
@@ -37,7 +37,7 @@ class MainWindow : public QMainWindow, public skybolt::EventListener
 	Q_OBJECT
 
 public:
-	MainWindow(const std::vector<skybolt::PluginFactory>& enginePluginFactories, const std::vector<EditorPluginFactory>& pluginFactories, QWidget *parent = 0, Qt::WindowFlags flags = 0);
+	MainWindow(const std::vector<skybolt::PluginFactory>& enginePluginFactories, const std::vector<EditorPluginFactory>& pluginFactories, QWidget *parent = 0, Qt::WindowFlags flags = Qt::WindowFlags());
 	~MainWindow();
 
 	skybolt::EngineRoot* getEngineRoot() const { return mEngineRoot.get(); }
@@ -100,10 +100,11 @@ private:
 	std::unique_ptr<SprocketModel> mSprocketModel;
 	std::unique_ptr<skybolt::sim::SimStepper> mSimStepper;
 	std::unique_ptr<Ui::MainWindow> ui;
-	QToolWindowManager* mToolWindowManager;
+	ToolWindowManager* mToolWindowManager;
 	std::vector<QAction*> mToolActions;
 	std::unique_ptr<skybolt::vis::ShaderSourceFileChangeMonitor> mShaderSourceFileChangeMonitor;
 	std::shared_ptr<skybolt::StatsDisplaySystem> mStatsDisplaySystem;
+	cxxtimer::Timer mUpdateTimer; //!< Time since last update
 
 	class EntitiesTableModel* mEntitiesTableModel;
 	class PictureTableModel* mPictureTableModel;

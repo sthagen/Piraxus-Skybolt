@@ -14,21 +14,25 @@
 #include <SkyboltSim/World.h>
 #include <SkyboltSim/CameraController/CameraController.h>
 #include <SkyboltSim/CameraController/CameraControllerSelector.h>
+#include <SkyboltSim/Components/CameraComponent.h>
 #include <SkyboltSim/Components/CameraControllerComponent.h>
 #include <SkyboltSim/Components/OrbitComponent.h>
 #include <SkyboltSim/Components/MainRotorComponent.h>
 #include <SkyboltSim/Components/NameComponent.h>
 #include <SkyboltSim/Components/ParentReferenceComponent.h>
 #include <SkyboltSim/Components/ProceduralLifetimeComponent.h>
+#include <SkyboltSim/Spatial/Frustum.h>
 #include <SkyboltSim/Spatial/GreatCircle.h>
 #include <SkyboltSim/Spatial/Orientation.h>
 #include <SkyboltSim/Spatial/Position.h>
 #include <SkyboltSim/System/SimStepper.h>
+#include <SkyboltCommon/Math/Box3.h>
 
 #include <SkyboltVis/Rect.h>
 #include <SkyboltVis/RenderOperation/DefaultRenderCameraViewport.h>
 #include <SkyboltVis/RenderOperation/RenderOperationSequence.h>
 #include <SkyboltVis/Window/CaptureScreenshot.h>
+#include <SkyboltVis/Window/OffscreenWindow.h>
 #include <SkyboltVis/Window/StandaloneWindow.h>
 
 #include <osg/Image>
@@ -110,36 +114,19 @@ static bool attachCameraToWindowWithEngine(sim::Entity& camera, vis::Window& win
 	return false;
 }
 
-static bool stepOnceAndRenderOnce(EngineRoot& engineRoot, vis::Window& window, double dtWallClock)
+static void stepSim(EngineRoot& engineRoot, double dt)
 {
 	SimStepper stepper(engineRoot.systemRegistry);
 	System::StepArgs args;
-	args.dtSim = dtWallClock;
-	args.dtWallClock = dtWallClock;
+	args.dtSim = dt;
+	args.dtWallClock = dt;
 	stepper.step(args);
-	return window.render();
 }
 
-static bool stepOnceAndRenderUntilDone(EngineRoot& engineRoot, vis::Window& window, double dtWallClock)
+static bool render(EngineRoot& engineRoot, vis::Window& window, vis::LoadTimingPolicy loadTimingPolicy)
 {
-	SimStepper stepper(engineRoot.systemRegistry);
-	System::StepArgs args;
-	args.dtSim = dtWallClock;
-	args.dtWallClock = dtWallClock;
-	stepper.step(args);
-
-	// Keep rendering until the last render does not have any outstanding loading tasks.
-	// Note we render first and then check (do, while) because a render may spawn additional tasks.
-	do
-	{
-		if (!window.render())
-		{
-			return false;
-		}
-	}
-	while (engineRoot.stats.terrainTileLoadQueueSize > 0 || engineRoot.stats.featureTileLoadQueueSize > 0);
-
-	return true;
+	stepSim(engineRoot, 0.0); // FIXME: We need to call this to update all the systems prior to rendering, but we don't actually need to 'step'.
+	return window.render(loadTimingPolicy);
 }
 
 static py::array_t<std::uint8_t> captureScreenshotToImage(vis::Window& window)
@@ -199,6 +186,22 @@ PYBIND11_MODULE(skybolt, m) {
 		.def_readwrite("lon", &LatLonAlt::lon)
 		.def_readwrite("alt", &LatLonAlt::alt);
 
+	py::class_<Frustum>(m, "Frustum")
+		.def(py::init())
+		.def_readwrite("origin", &Frustum::origin)
+		.def_readwrite("orientation", &Frustum::orientation)
+		.def_readwrite("fieldOfViewHorizontal", &Frustum::fieldOfViewHorizontal)
+		.def_readwrite("fieldOfViewVertical", &Frustum::fieldOfViewVertical);
+
+	py::class_<Box3d>(m, "Box3d")
+		.def(py::init())
+		.def(py::init<const Vector3&, const Vector3&>())
+		.def("size", &Box3d::size)
+		.def("center", &Box3d::center)
+		.def("merge", &Box3d::merge)
+		.def_readwrite("minimum", &Box3d::minimum)
+		.def_readwrite("maximum", &Box3d::maximum);
+
 	py::class_<Orbit>(m, "Orbit")
 		.def(py::init())
 		.def_readwrite("semiMajorAxis", &Orbit::semiMajorAxis)
@@ -208,6 +211,11 @@ PYBIND11_MODULE(skybolt, m) {
 		.def_readwrite("argumentOfPeriapsis", &Orbit::argumentOfPeriapsis)
 		.def_readwrite("trueAnomaly", &Orbit::trueAnomaly);
 		
+	py::class_<CameraState>(m, "CameraState")
+		.def(py::init())
+		.def_readwrite("nearClipDistance", &CameraState::nearClipDistance)
+		.def_readwrite("farClipDistance", &CameraState::farClipDistance)
+		.def_readwrite("fovY", &CameraState::fovY);
 
 	py::class_<vis::RectI>(m, "RectI")
 		.def(py::init<int, int, int, int>());
@@ -248,8 +256,14 @@ PYBIND11_MODULE(skybolt, m) {
 		.def(py::init<sim::Entity*>())
 		.def("getParent", &ParentReferenceComponent::getParent);
 
+	py::class_<CameraComponent, std::shared_ptr<CameraComponent>, Component>(m, "CameraComponent")
+		.def_property("state",
+			[](const CameraComponent& c) { return c.getState(); },
+			[](CameraComponent& c, const CameraState& state) { CameraState& s = c.getState(); s = state; },
+			py::return_value_policy::reference_internal);
+
 	py::class_<CameraControllerComponent, std::shared_ptr<CameraControllerComponent>, Component>(m, "CameraControllerComponent")
-		.def_property_readonly("cameraController", [](const CameraControllerComponent& c) {return c.cameraController.get(); }, py::return_value_policy::reference_internal);
+		.def_property_readonly("cameraController", [](const CameraControllerComponent& c) { return c.cameraController.get(); }, py::return_value_policy::reference_internal);
 
 	py::class_<ProceduralLifetimeComponent, std::shared_ptr<ProceduralLifetimeComponent>, Component>(m, "ProceduralLifetimeComponent")
 		.def(py::init());
@@ -305,12 +319,20 @@ PYBIND11_MODULE(skybolt, m) {
 	py::class_<vis::StandaloneWindow, vis::Window>(m, "StandaloneWindow")
 		.def(py::init<vis::RectI>());
 
+	py::class_<vis::OffscreenWindow, vis::Window>(m, "OffscreenWindow")
+		.def(py::init<int, int>()); // width, height
+
+	py::enum_<vis::LoadTimingPolicy>(m, "LoadTimingPolicy")
+    .value("LoadAcrossMultipleFrames", vis::LoadTimingPolicy::LoadAcrossMultipleFrames)
+    .value("LoadBeforeRender", vis::LoadTimingPolicy::LoadBeforeRender)
+    .export_values();
+
 	m.def("getGlobalEngineRoot", &getGlobalEngineRoot, "Get global EngineRoot", py::return_value_policy::reference);
 	m.def("setGlobalEngineRoot", &setGlobalEngineRoot, "Set global EngineRoot");
 	m.def("createEngineRootWithDefaults", &createEngineRootWithDefaults, "Create an EngineRoot with default values");
 	m.def("attachCameraToWindowWithEngine", &attachCameraToWindowWithEngine);
-	m.def("stepOnceAndRenderOnce", &stepOnceAndRenderOnce);
-	m.def("stepOnceAndRenderUntilDone", &stepOnceAndRenderUntilDone);
+	m.def("stepSim", &stepSim);
+	m.def("render", &render, py::arg("engineRoot"), py::arg("window"), py::arg("loadTimingPolicy") = vis::LoadTimingPolicy::LoadBeforeRender);
 	m.def("toGeocentricPosition", [](const PositionPtr& position) { return std::make_shared<GeocentricPosition>(toGeocentric(*position)); });
 	m.def("toGeocentricOrientation", [](const OrientationPtr& orientation, const LatLon& latLon) { return std::make_shared<GeocentricOrientation>(toGeocentric(*orientation, latLon)); });
 	m.def("toLatLonAlt", [](const PositionPtr& position) { return std::make_shared<LatLonAltPosition>(toLatLonAlt(*position)); });
@@ -323,4 +345,5 @@ PYBIND11_MODULE(skybolt, m) {
 	m.def("captureScreenshot", [](vis::Window& window) { return captureScreenshotToImage(window); });
 	m.def("captureScreenshot", [](vis::Window& window, const std::string& filename) { return vis::captureScreenshot(window, filename); });
 	m.def("moveDistanceAndBearing", &moveDistanceAndBearing);
+	m.def("transformToScreenSpace", &transformToScreenSpace);
 }

@@ -8,6 +8,7 @@
 #pragma once
 
 #include "SkyboltVis/SkyboltVisFwd.h"
+#include "SkyboltVis/RenderContext.h"
 #include "SkyboltVis/RenderOperation/RenderOperationSequence.h"
 
 #include <osgViewer/Viewer>
@@ -19,11 +20,11 @@ namespace vis {
 class Window
 {
 public:
-	Window(const DisplaySettings& config);
+	Window(std::unique_ptr<osgViewer::Viewer> viewer, const DisplaySettings& config);
 	~Window();
 
 	//! @returns false if window has been closed
-	virtual bool render();
+	virtual bool render(LoadTimingPolicy loadTimingPolicy = LoadTimingPolicy::LoadAcrossMultipleFrames);
 
 	virtual int getWidth() const = 0;
 	virtual int getHeight() const = 0;

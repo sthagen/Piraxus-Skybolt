@@ -9,7 +9,7 @@ jobs:
         include:
           - os: ubuntu-20.04
             python-arch: "x64"
-            python-version: "3.6.x" 
+            python-version: "3.7.x" 
             install-headerfiles: true
             prepare-python: true
             gcc-version: "9"
@@ -17,7 +17,6 @@ jobs:
     runs-on: ${{ matrix.os }}
     env:
       buildDir: ${{github.workspace}}/build
-      depsDir: ${{github.workspace}}/deps
     steps:
     - uses: actions/checkout@v2.4.0
     - name: Set up Python ${{ matrix.python-version }}
@@ -33,7 +32,7 @@ jobs:
     - name: Install conan
       run: |
         python3 -m pip install --upgrade pip
-        pip3 install conan==1.50.0
+        pip3 install conan==1.52.0
     - name: Add conan remotes
       run: |
         conan config set general.revisions_enabled=1
@@ -45,15 +44,13 @@ jobs:
     - name: Conan install
       run: |
         export CONAN_SYSREQUIRES_MODE=enabled
-        mkdir ${{env.depsDir}}
-        cd ${{env.depsDir}}
-        conan install ${{github.workspace}} -o openscenegraph-mr:shared=True --build=cxxtimer --build=px_sched --build=xsimd -c tools.system.package_manager:mode=install -c tools.system.package_manager:sudo=True
-    - name: Cmake build
-      run: |
         mkdir ${{env.buildDir}}
         cd ${{env.buildDir}}
-        cmake -DCMAKE_TOOLCHAIN_FILE=${{env.depsDir}}/conan_paths.cmake ${{github.workspace}}
-        cmake --build .
+        conan install ${{github.workspace}} -o openscenegraph-mr:shared=True -o enable_sprocket=True -o enable_python=True -o qt:qtsvg=False --build=missing -c tools.system.package_manager:mode=install -c tools.system.package_manager:sudo=True
+    - name: Cmake build
+      run: |
+        cd ${{env.buildDir}}
+        conan build ${{github.workspace}}
     - name: Cmake test
       run: |
         cd ${{env.buildDir}}

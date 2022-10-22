@@ -4,8 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-#pragma once
-
 #include "WaterMaterial.h"
 #include "SkyboltVis/Renderable/Water/WaterStateSet.h"
 #include "SkyboltVis/Renderable/Water/WaveHeightTextureGenerator.h"
@@ -48,22 +46,6 @@ osg::Texture2D* createFoamMaskTexture(int width, int height)
 	texture->setWrap(osg::Texture::WRAP_T, osg::Texture::REPEAT);
 
 	return texture;
-}
-
-//! @param textureScale is textureSizeInWorldSpace / maxHeightInWorldSpace
-osg::StateSet* createHeightToNormalMapStateSet(osg::ref_ptr<osg::Program> program, osg::Texture2D* heightTexture, const osg::Vec2f& textureScale)
-{
-	osg::StateSet* stateSet = new osg::StateSet();
-	stateSet->setAttributeAndModes(program, osg::StateAttribute::ON);
-	stateSet->setTextureAttributeAndModes(0, heightTexture, osg::StateAttribute::ON);
-
-	const osg::Image& image = *heightTexture->getImage(0);
-	osg::Vec2f texelSize(1.0f / (float)image.s(), 1.0f / (float)image.t());
-	osg::Vec2f texelScale(textureScale.x() * texelSize.x(), textureScale.y() * texelSize.y());
-	stateSet->addUniform(new osg::Uniform("texelSizeInTextureSpace", texelSize));
-	stateSet->addUniform(new osg::Uniform("texelScale", texelScale));
-
-	return stateSet;
 }
 
 class CascadedWaveHeightTextureGenerator
