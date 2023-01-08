@@ -7,7 +7,8 @@
 #pragma once
 
 #include "SprocketFwd.h"
-#include "WorldTreeWidget.h"
+#include "TreeWidget/WorldTreeWidget.h"
+#include "Viewport/SceneObjectPicker.h"
 #include <SkyboltEngine/EngineRoot.h>
 #include <SkyboltEngine/Plugin/PluginHelpers.h>
 #include <SkyboltSim/SkyboltSimFwd.h>
@@ -29,6 +30,7 @@ class TreeItem;
 class WorldTreeWidget;
 
 namespace Ui { class MainWindow; }
+namespace skybolt { class VisEntityIcons; }
 
 class Application;
 
@@ -42,7 +44,14 @@ public:
 
 	skybolt::EngineRoot* getEngineRoot() const { return mEngineRoot.get(); }
 
+	void clearProject();
 	void open(const QString& filename);
+	void save(class QFile& file);
+
+	void addToolWindow(const QString& windowName, QWidget* window);
+	void raiseToolWindow(QWidget* widget);
+
+	QMenu* addVisibilityFilterableSubMenu(QMenu& parent, const QString& text, skybolt::EntityVisibilityFilterable* filterable) const;
 
 public slots:
 	void newScenario();
@@ -65,7 +74,9 @@ private slots:
 	
 	void explorerSelectionChanged(const TreeItem& item);
 
-	void enableViewportInput();
+	void onViewportMouseDown(Qt::MouseButton button, const QPointF& position);
+
+	void showContextMenu(const QPoint& point);
 
 private:
 	void onEvent(const skybolt::Event& event) override;
@@ -79,27 +90,25 @@ private:
 	void setCamera(const skybolt::sim::EntityPtr& simCamera);
 	QToolBar * createViewportToolBar();
 	QString getDefaultProjectDirectory() const;
-	void clearProject();
-	void save(class QFile& file);
 	void closeEvent(QCloseEvent*);
-	void addToolWindow(const QString& windowName, QWidget* window);
-	void raiseToolWindow(QWidget* widget);
 
 	void setProjectFilename(const QString& filename);
-
-	std::vector<TreeItemContextActionPtr> createContextActions() const;
-
-	QMenu* addVisibilityFilterableSubMenu(QMenu& parent, const QString& text, skybolt::EntityVisibilityFilterable* filterable) const;
 
 	void addViewportMenuActions(QMenu& menu);
 
 	void setCameraTarget(skybolt::sim::Entity* target);
+
+	void setSelectedEntity(skybolt::sim::Entity* entity);
+	void setPropertiesModel(PropertiesModelPtr properties);
+
+	glm::dmat4 calcCurrentViewProjTransform() const;
 
 private:
 	std::unique_ptr<skybolt::EngineRoot> mEngineRoot;
 	std::unique_ptr<SprocketModel> mSprocketModel;
 	std::unique_ptr<skybolt::sim::SimStepper> mSimStepper;
 	std::unique_ptr<Ui::MainWindow> ui;
+	QAction* mViewMenuToolWindowSeparator;
 	ToolWindowManager* mToolWindowManager;
 	std::vector<QAction*> mToolActions;
 	std::unique_ptr<skybolt::vis::ShaderSourceFileChangeMonitor> mShaderSourceFileChangeMonitor;
@@ -111,6 +120,8 @@ private:
 	class PlanTableModel* mPlanTableModel;
 	std::shared_ptr<class PropertiesModel> mPropertiesModel;
 
+	std::vector<DefaultContextActionPtr> mContextActions;
+
 	bool mDisableInputSystemOnNextUpdate = false;
 	std::shared_ptr<skybolt::InputPlatform> mInputPlatform;
 	std::unique_ptr<class ViewportInput> mViewportInput;
@@ -121,6 +132,9 @@ private:
 
 	QString mProjectFilename;
 
+	SceneObjectPicker mSceneObjectPicker;
+
+	osg::ref_ptr<skybolt::VisEntityIcons> mVisSelectedEntityIcon;
 	std::unique_ptr<skybolt::VisNameLabels> mVisNameLabels;
 	std::unique_ptr<skybolt::VisOrbits> mVisOrbits;
 	std::unique_ptr<skybolt::ForcesVisBinding> mForcesVisBinding;
