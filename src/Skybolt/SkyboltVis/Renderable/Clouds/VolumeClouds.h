@@ -36,13 +36,12 @@ public:
 		osg::Uniform* bottomLeftDir;
 		osg::Uniform* bottomRightDir;
 		osg::Uniform* upscaleFactor;
+		osg::Uniform* jitterOffset;
 	};
 
 	void updatePreRender(const CameraRenderContext& context) override;
 
 	osg::Matrix getModelMatrix() const;
-
-	int getCurrentFrameNumber() const { return mFrameNumber; }
 
 	//! @return the temporal-antialiasing jitter offset of the current frame in NDC coordinates
 	osg::Vec2f getCurrentFrameJitterNdcOffset() const { return mJitterOffset; }
@@ -51,7 +50,6 @@ private:
 	osg::ref_ptr<osg::Geode> mGeode;
 	Uniforms mUniforms;
 	bool mApplyTemporalUpscalingJitter = false;
-	int mFrameNumber = 0;
 	osg::Vec2f mJitterOffset = osg::Vec2f(0,0);
 };
 

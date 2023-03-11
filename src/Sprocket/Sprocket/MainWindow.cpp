@@ -23,18 +23,18 @@
 #include "Entity/EntityListModel.h"
 #include "Entity/EntityPropertiesModel.h"
 #include "Scenario/ScenarioPropertiesModel.h"
-#include "Scenario/ScenarioSerialization.h"
 #include "Viewport/VisEntityIcons.h"
 #include "Viewport/OsgWidget.h"
 
 #include <SkyboltEngine/EngineRootFactory.h>
 #include <SkyboltEngine/EngineSettings.h>
 #include <SkyboltEngine/EngineStats.h>
-#include <SkyboltEngine/Scenario.h>
 #include <SkyboltEngine/TemplateNameComponent.h>
 #include <SkyboltEngine/VisObjectsComponent.h>
 #include <SkyboltEngine/Diagnostics/StatsDisplaySystem.h>
 #include <SkyboltEngine/Input/LogicalAxis.h>
+#include <SkyboltEngine/Scenario/Scenario.h>
+#include <SkyboltEngine/Scenario/ScenarioSerialization.h>
 #include <SkyboltEngine/SimVisBinding/CameraSimVisBinding.h>
 #include <SkyboltEngine/SimVisBinding/ForcesVisBinding.h>
 #include <SkyboltEngine/SimVisBinding/EntityVisibilityFilterable.h>
@@ -48,14 +48,17 @@
 #include <SkyboltSim/Components/NameComponent.h>
 #include <SkyboltSim/Components/PlanetComponent.h>
 #include <SkyboltSim/Spatial/Geocentric.h>
+#include <SkyboltSim/Spatial/GreatCircle.h>
 #include <SkyboltSim/Physics/Astronomy.h>
 #include <SkyboltSim/System/SimStepper.h>
 #include <SkyboltSim/System/System.h>
 #include <SkyboltSim/System/SystemRegistry.h>
 #include <SkyboltSim/World.h>
 #include <SkyboltVis/Camera.h>
+#include <SkyboltVis/DisplaySettings.h>
 #include <SkyboltVis/Shader/OsgShaderHelpers.h>
 #include <SkyboltVis/Scene.h>
+#include <SkyboltVis/VisRoot.h>
 #include <SkyboltVis/Renderable/Planet/Planet.h>
 #include <SkyboltVis/Renderable/Arrows.h>
 #include <SkyboltVis/RenderOperation/DefaultRenderCameraViewport.h>
@@ -63,11 +66,11 @@
 #include <SkyboltVis/RenderOperation/RenderTarget.h>
 #include <SkyboltVis/Shader/ShaderSourceFileChangeMonitor.h>
 #include <SkyboltVis/Window/CaptureScreenshot.h>
-#include <SkyboltVis/Window/DisplaySettings.h>
 #include <SkyboltVis/Window/Window.h>
 #include <SkyboltCommon/File/OsDirectories.h>
 #include <SkyboltCommon/Json/ReadJsonFile.h>
 #include <SkyboltCommon/Json/WriteJsonFile.h>
+#include <SkyboltCommon/Math/IntersectionUtility.h>
 #include <SkyboltCommon/Math/MathUtility.h>
 #include <SkyboltCommon/StringVector.h>
 #include <SkyboltCommon/Range.h>
@@ -86,6 +89,7 @@
 #include <QFileDialog>
 #include <QJsonArray>
 #include <QJsonDocument>
+#include <QJsonObject>
 #include <QMessageBox>
 #include <QPushButton>
 #include <QSortFilterProxyModel>
@@ -314,7 +318,7 @@ static nlohmann::json readOrCreateEngineSettingsFile(QWidget* parent, QSettings&
 	return result;
 }
 
-static osg::ref_ptr<osg::Texture> createEntitySelectionIcon(int width = 64)
+static osg::ref_ptr<osg::Texture> createEntitySelectionIcon(int width = 32)
 {
 	int height = width;
 	osg::ref_ptr<osg::Image> image = new osg::Image();
@@ -369,7 +373,7 @@ MainWindow::MainWindow(const std::vector<PluginFactory>& enginePluginFactories, 
 	mOsgWidget->setContextMenuPolicy(Qt::CustomContextMenu);
 	connect(mOsgWidget, SIGNAL(customContextMenuRequested(const QPoint&)), this, SLOT(showContextMenu(const QPoint&)));
 
-	mStatsDisplaySystem = std::make_shared<StatsDisplaySystem>(&mOsgWidget->getWindow()->getViewer(), mViewport->getFinalRenderTarget()->getOsgCamera());
+	mStatsDisplaySystem = std::make_shared<StatsDisplaySystem>(&mOsgWidget->getVisRoot()->getViewer(), mOsgWidget->getWindow()->getView(), mViewport->getFinalRenderTarget()->getOsgCamera());
 	mStatsDisplaySystem->setVisible(false);
 	mEngineRoot->systemRegistry->push_back(mStatsDisplaySystem);
 
@@ -402,19 +406,19 @@ MainWindow::MainWindow(const std::vector<PluginFactory>& enginePluginFactories, 
 
 	Scenario& scenario = mEngineRoot->scenario;
 
-	auto group = mEngineRoot->scene->getBucketGroup(vis::Scene::Bucket::Default);
+	auto hudGroup = mEngineRoot->scene->getBucketGroup(vis::Scene::Bucket::Hud);
 
 	mVisSelectedEntityIcon = new VisEntityIcons(mEngineRoot->programs, createEntitySelectionIcon());
-	group->addChild(mVisSelectedEntityIcon);
+	hudGroup->addChild(mVisSelectedEntityIcon);
 
-	mVisNameLabels = std::make_unique<VisNameLabels>(world, group, mEngineRoot->programs);
+	mVisNameLabels = std::make_unique<VisNameLabels>(world, hudGroup, mEngineRoot->programs);
 
 	osg::ref_ptr<osg::Program> unlitColoredProgram = mEngineRoot->programs.getRequiredProgram("unlitColored");
 
 	{
 		vis::Polyline::Params params;
 		params.program = unlitColoredProgram;
-		mVisOrbits.reset(new VisOrbits(world, group, params, mEngineRoot->julianDateProvider));
+		mVisOrbits.reset(new VisOrbits(world, hudGroup, params, mEngineRoot->julianDateProvider));
 	}
 	
 	{
@@ -529,7 +533,6 @@ MainWindow::MainWindow(const std::vector<PluginFactory>& enginePluginFactories, 
 
 		mWorldTreeWidget = new WorldTreeWidget(config);
 		QObject::connect(mWorldTreeWidget, &WorldTreeWidget::selectionChanged, this, &MainWindow::explorerSelectionChanged);
-		QObject::connect(mWorldTreeWidget, &WorldTreeWidget::itemClicked, this, &MainWindow::explorerSelectionChanged);
 
 		addToolWindow("Explorer", mWorldTreeWidget);
 	}
@@ -542,7 +545,7 @@ MainWindow::MainWindow(const std::vector<PluginFactory>& enginePluginFactories, 
 		}
 	}
 
-	addViewportMenuActions(*ui->menuView);
+	addViewportMenuActions();
 
 	connect(mOsgWidget, &OsgWidget::mouseDown, this, [this](Qt::MouseButton button, const QPointF& position) {
 		onViewportMouseDown(button, position);
@@ -700,14 +703,23 @@ void MainWindow::updateIfIntervalElapsed()
 	update();
 }
 
-static bool isNamedEntityWithPosition(const Entity& entity)
-{
-	return getPosition(entity).has_value() && entity.getFirstComponent<TemplateNameComponent>() != nullptr;
-}
-
 static bool isPlanet(const Entity& entity)
 {
 	return getPosition(entity).has_value() && entity.getFirstComponent<PlanetComponent>() != nullptr;
+}
+
+static bool entityPredicateAlwaysFalse(const Entity& entity)
+{
+	return false;
+}
+
+static sim::CameraControllerSelectorPtr getCameraControllerSelector(const sim::Entity& entity)
+{	
+	if (auto controller = entity.getFirstComponent<sim::CameraControllerComponent>())
+	{
+		return std::dynamic_pointer_cast<sim::CameraControllerSelector>(controller->cameraController);
+	}
+	return nullptr;
 }
 
 class CameraControllerWidget : public QWidget
@@ -723,7 +735,7 @@ public:
 		mCameraModeCombo->setEnabled(false);
 		layout()->addWidget(mCameraModeCombo);
 
-		mTargetListModel = new EntityListModel(world, isNamedEntityWithPosition);
+		mTargetListModel = new EntityListModel(world, &entityPredicateAlwaysFalse);
 		auto proxyModel = new QSortFilterProxyModel(this);
 		proxyModel->setSourceModel(mTargetListModel);
 		
@@ -735,8 +747,11 @@ public:
 		layout()->addWidget(mCameraTargetCombo);
 	}
 
-	void setCameraControllerSelector(const sim::CameraControllerSelectorPtr& cameraControllerSelector)
+	void setCamera(const sim::EntityPtr& camera)
 	{
+		mCamera = camera;
+		sim::CameraControllerSelectorPtr cameraControllerSelector = camera ? getCameraControllerSelector(*camera) : nullptr;
+
 		// Clear
 		mCameraModeCombo->disconnect();
 		mCameraTargetCombo->disconnect();
@@ -747,6 +762,7 @@ public:
 		{
 			mCameraModeCombo->setEnabled(false);
 			mCameraTargetCombo->setEnabled(false);
+			mTargetListModel->setEntityFilter(&entityPredicateAlwaysFalse);
 			return;
 		}
 
@@ -805,14 +821,23 @@ private:
 		{
 			mTargetListModel->setEntityFilter(isPlanet);
 		}
+		else if (mCamera)
+		{
+			mTargetListModel->setEntityFilter([cameraName = getName(*mCamera)] (const sim::Entity& entity) {
+				return getPosition(entity).has_value()
+					&& entity.getFirstComponent<TemplateNameComponent>() != nullptr
+					&& getName(entity) != cameraName;
+			});
+		}
 		else
 		{
-			mTargetListModel->setEntityFilter(isNamedEntityWithPosition);
+			mTargetListModel->setEntityFilter(&entityPredicateAlwaysFalse);
 		}
 	}
 
 private:
 	sim::World* mWorld;
+	sim::EntityPtr mCamera;
 	QComboBox* mCameraModeCombo;
 	QComboBox* mCameraTargetCombo;
 	EntityListModel* mTargetListModel;
@@ -972,39 +997,8 @@ void MainWindow::open(const QString& filename)
 		QByteArray wholeFile = file.readAll();
 		QJsonObject const json = QJsonDocument::fromJson(wholeFile).object();
 
-		QJsonValue value = json["scenario"];
-		if (!value.isUndefined())
-		{
-			loadScenario(engineRoot->scenario, value.toObject());
-		}
-
-		value = json["geometry"];
-		if (!value.isUndefined())
-		{
-			mToolWindowManager->restoreGeometry(QByteArray::fromBase64(value.toString().toUtf8()));
-		}
-
-		value = json["windows"];
-		if (!value.isUndefined())
-		{
-			mToolWindowManager->restoreState(toVariantMap(QByteArray::fromBase64(value.toString().toUtf8())));
-		}
-
-		value = json["entities"];
-		if (!value.isUndefined())
-		{
-			loadEntities(*engineRoot->simWorld, *engineRoot->entityFactory, value);
-		}
-
-		value = json["viewport"];
-		if (!value.isUndefined())
-		{
-			loadViewport(value.toObject());
-		}
-
+		loadProject(json);
 		mRecentFilesMenuPopulator->addFilename(filename);
-
-		FOREACH_CALL(mPlugins, loadProject, json);
 	}
 	catch (std::exception &e)
 	{
@@ -1013,18 +1007,71 @@ void MainWindow::open(const QString& filename)
 	}
 }
 
+static nlohmann::json toNlohmannJson(const QJsonObject& json)
+{
+	QJsonDocument doc(json);
+	QString str(doc.toJson(QJsonDocument::Compact));
+	return nlohmann::json::parse(str.toStdString());
+}
+
+static QJsonObject toQJson(const nlohmann::json& json)
+{
+	auto doc = QJsonDocument::fromJson(QString::fromStdString(json.dump()).toUtf8());
+	return doc.object();
+}
+
+void MainWindow::loadProject(const QJsonObject& json)
+{
+	QJsonValue value = json["scenario"];
+	if (!value.isUndefined())
+	{
+		loadScenario(mEngineRoot->scenario, toNlohmannJson(value.toObject()));
+	}
+
+	value = json["geometry"];
+	if (!value.isUndefined())
+	{
+		mToolWindowManager->restoreGeometry(QByteArray::fromBase64(value.toString().toUtf8()));
+	}
+
+	value = json["windows"];
+	if (!value.isUndefined())
+	{
+		mToolWindowManager->restoreState(toVariantMap(QByteArray::fromBase64(value.toString().toUtf8())));
+	}
+
+	value = json["entities"];
+	if (!value.isUndefined())
+	{
+		loadEntities(*mEngineRoot->simWorld, *mEngineRoot->entityFactory, toNlohmannJson(value.toObject()));
+	}
+
+	value = json["viewport"];
+	if (!value.isUndefined())
+	{
+		loadViewport(value.toObject());
+	}
+
+	FOREACH_CALL(mPlugins, loadProject, json);
+}
+
 void MainWindow::save(QFile& file)
 {
 	QJsonObject json;
-	json["scenario"] = saveScenario(mSprocketModel->engineRoot->scenario);
+	saveProject(json);
+
+	file.write(QJsonDocument(json).toJson());
+}
+
+void MainWindow::saveProject(QJsonObject& json) const
+{
+	json["scenario"] = toQJson(saveScenario(mSprocketModel->engineRoot->scenario));
 	json["windows"] = QString(toByteArray(mToolWindowManager->saveState()).toBase64());
 	json["geometry"] = QString(saveGeometry().toBase64());
-	json["entities"] = saveEntities(*mSprocketModel->engineRoot->simWorld);
+	json["entities"] = toQJson(saveEntities(*mSprocketModel->engineRoot->simWorld));
 	json["viewport"] = saveViewport();
 
 	FOREACH_CALL(mPlugins, saveProject, json);
-
-	file.write(QJsonDocument(json).toJson());
 }
 
 void MainWindow::save()
@@ -1099,7 +1146,7 @@ static QJsonArray writeJson(const osg::Vec3& v)
 	return { v.x(), v.y(), v.z() };
 }
 
-QJsonObject MainWindow::saveViewport()
+QJsonObject MainWindow::saveViewport() const
 {
 	QJsonObject json;
 	if (mCurrentSimCamera)
@@ -1131,17 +1178,9 @@ void MainWindow::setCamera(const sim::EntityPtr& simCamera)
 	if (mCurrentSimCamera != simCamera)
 	{
 		mCurrentSimCamera = simCamera;
-		vis::CameraPtr visCamera;
-		sim::CameraControllerSelectorPtr selector;
-		if (mCurrentSimCamera)
-		{
-			visCamera = getFirstVisCamera(*mCurrentSimCamera);
-			if (auto controller = mCurrentSimCamera->getFirstComponent<CameraControllerComponent>())
-			{
-				selector = std::dynamic_pointer_cast<sim::CameraControllerSelector>(controller->cameraController);
-			}
-		}
-		mCameraControllerWidget->setCameraControllerSelector(selector);
+		mCameraControllerWidget->setCamera(mCurrentSimCamera);
+
+		vis::CameraPtr visCamera = mCurrentSimCamera ? getFirstVisCamera(*mCurrentSimCamera) : nullptr;
 		mViewport->setCamera(visCamera);
 
 		mCameraCombo->setCurrentText(simCamera ? QString::fromStdString(getName(*simCamera)) : "");
@@ -1254,25 +1293,29 @@ void MainWindow::setPropertiesModel(PropertiesModelPtr properties)
 	mPropertiesEditor->setModel(mPropertiesModel);
 }
 
-void MainWindow::setSelectedEntity(sim::Entity* entity)
+void MainWindow::setSelectedEntity(std::weak_ptr<skybolt::sim::Entity> entity)
 {
 	mSelectedEntity = entity;
 	std::set<sim::Entity*> selection;
-	if (entity)
+	if (auto e = entity.lock(); e)
 	{
-		selection.insert(entity);
+		selection.insert(e.get());
 	}
 	mVisSelectedEntityIcon->setEntities(selection);
+	
+	mWorldTreeWidget->blockSignals(true); // prevent tree widget signaling explorerSelectionChanged
+	mWorldTreeWidget->setSelectedEntity(entity.lock().get());
+	mWorldTreeWidget->blockSignals(false);
 }
 
 void MainWindow::explorerSelectionChanged(const TreeItem& item)
 {
-	setSelectedEntity(nullptr);
+	setSelectedEntity(std::weak_ptr<skybolt::sim::Entity>());
 
 	if (auto entityItem = dynamic_cast<const EntityTreeItem*>(&item))
 	{
 		setSelectedEntity(entityItem->data);
-		setPropertiesModel(std::make_shared<EntityPropertiesModel>(mSelectedEntity));
+		setPropertiesModel(std::make_shared<EntityPropertiesModel>(mSelectedEntity.lock().get()));
 	}
 	else if (auto scenarioItem = dynamic_cast<const ScenarioTreeItem*>(&item))
 	{
@@ -1282,42 +1325,62 @@ void MainWindow::explorerSelectionChanged(const TreeItem& item)
 	FOREACH_CALL(mPlugins, explorerSelectionChanged, item);
 }
 
+std::optional<PickedSceneObject> MainWindow::pickSceneObjectAtPointInWindow(const QPointF& position, const EntitySelectionPredicate& predicate) const
+{
+	glm::vec2 pointNdc = glm::vec2(float(position.x()) / mOsgWidget->width(), float(position.y()) / mOsgWidget->height());
+	glm::dmat4 transform = calcCurrentViewProjTransform();
+	return mSceneObjectPicker(transform, pointNdc, 0.04, predicate);
+}
+
+std::optional<sim::Vector3> MainWindow::pickPointOnPlanetAtPointInWindow(const QPointF& position) const
+{
+   glm::vec2 pointNdc = glm::vec2(float(position.x()) / mOsgWidget->width(), float(position.y()) / mOsgWidget->height());
+   sim::Vector3 camPosition = *getPosition(*mCurrentSimCamera);
+   return pickPointOnPlanet(*mEngineRoot->simWorld, camPosition, glm::inverse(calcCurrentViewProjTransform()), pointNdc);
+}
+
+MainWindow::ViewportClickHandler MainWindow::getDefaultViewportClickHandler()
+{
+	static ViewportClickHandler f = [this] (Qt::MouseButton button, const QPointF& position) {
+		if (button == Qt::MouseButton::LeftButton)
+		{
+			if (mViewportInput)
+			{
+				mViewportInput->setEnabled(true);
+			}
+		}
+		else if (button == Qt::MouseButton::MiddleButton)
+		{
+			std::weak_ptr<skybolt::sim::Entity> selectedEntity;
+			auto hasNamePredicate = [] (const skybolt::sim::Entity& e) { return !getName(e).empty(); };
+			
+			if (std::optional<PickedSceneObject> object = pickSceneObjectAtPointInWindow(position, hasNamePredicate); object)
+			{
+				selectedEntity = object->entity;
+			}
+			if (selectedEntity.lock() != mSelectedEntity.lock())
+			{
+				setSelectedEntity(selectedEntity);
+				setPropertiesModel(selectedEntity.lock() ? std::make_shared<EntityPropertiesModel>(selectedEntity.lock().get()) : nullptr);
+			}
+		}
+	};
+	return f;
+}
+
 void MainWindow::onViewportMouseDown(Qt::MouseButton button, const QPointF& position)
 {
-	if (button == Qt::MouseButton::LeftButton)
-	{
-		if (mViewportInput)
-		{
-			mViewportInput->setEnabled(true);
-		}
-	}
-	else if (button == Qt::MouseButton::MiddleButton)
-	{
-		glm::dmat4 transform = calcCurrentViewProjTransform();
-
-		sim::Entity* selectedEntity = nullptr;
-		if (std::optional<PickedSceneObject> object = mSceneObjectPicker(transform, glm::vec2(position.x(), position.y()), 0.04); object)
-		{
-			selectedEntity = object->entity.get();
-		}
-		if (selectedEntity != mSelectedEntity)
-		{
-			setSelectedEntity(selectedEntity);
-			setPropertiesModel(selectedEntity ? std::make_shared<EntityPropertiesModel>(selectedEntity) : nullptr);
-		}
-	}
+	mViewportClickHandler(button, position);
 }
 
 void MainWindow::showContextMenu(const QPoint& point)
 {
    QMenu contextMenu(tr("Context menu"), this);
 
-   glm::vec2 pointNdc = glm::vec2(float(point.x()) / mOsgWidget->width(), 1.0 - float(point.y()) / mOsgWidget->height());
-   sim::Vector3 camPosition = *getPosition(*mCurrentSimCamera);
-   if (auto intersection = pickPointOnPlanet(*mEngineRoot->simWorld, camPosition, glm::inverse(calcCurrentViewProjTransform()), pointNdc); intersection)
+   if (auto intersection = pickPointOnPlanetAtPointInWindow(point); intersection)
    {
 	   ActionContext context;
-	   context.entity = mSelectedEntity;
+	   context.entity = mSelectedEntity.lock().get();
 	   context.point = *intersection;
 
 	   for (const auto& contextAction : mContextActions)
@@ -1412,9 +1475,9 @@ static QAction* addCheckedAction(QMenu& menu, const QString& text, std::function
 	return action;
 }
 
-QMenu* MainWindow::addVisibilityFilterableSubMenu(QMenu& parent, const QString& text, EntityVisibilityFilterable* filterable) const
+QMenu* MainWindow::addVisibilityFilterableSubMenu(const QString& text, EntityVisibilityFilterable* filterable) const
 {
-	QMenu* menu = parent.addMenu(text);
+	QMenu* menu = ui->menuView->addMenu(text);
 
 	QActionGroup* alignmentGroup = new QActionGroup(menu);
 
@@ -1422,28 +1485,47 @@ QMenu* MainWindow::addVisibilityFilterableSubMenu(QMenu& parent, const QString& 
 		filterable->setVisibilityPredicate(EntityVisibilityFilterable::visibilityOff);
 	});
 
+	auto hasLineOfSight = [this](const Entity& entity) {
+		if (const auto& entityPosition = getPosition(entity); entityPosition)
+		{
+			// FIXME: We shouldn't assume position is in geocetric coordinates, or earth radius
+			const auto cameraPosition = *getPosition(*mCurrentSimCamera);
+			Vector3 camToEntityDir = *entityPosition - cameraPosition;
+			double length = glm::length(camToEntityDir);
+			camToEntityDir /= length;
+
+			double effectivePlanetRadius = sim::earthRadius() - 10000; // use a slightly smaller radius for robustness
+			return !intersectRaySegmentSphere(cameraPosition, camToEntityDir, length, Vector3(0,0,0), effectivePlanetRadius);
+		}
+		return false;
+	};
+
 	QAction* onAction = addCheckedAction(*menu, "Show All", [=](bool checked) {
-		filterable->setVisibilityPredicate(EntityVisibilityFilterable::visibilityOn);
+		filterable->setVisibilityPredicate(hasLineOfSight);
 	});
 
 	QAction* selectedAction = addCheckedAction(*menu, "Show Selected", [=](bool checked) {
-		filterable->setVisibilityPredicate([=](const Entity& entity) {return mSelectedEntity  == &entity; });
+		filterable->setVisibilityPredicate([=](const Entity& entity) {
+			return (mSelectedEntity.lock().get() == &entity) &&
+				hasLineOfSight(entity);
+		});
 	});
 
 	alignmentGroup->addAction(offAction);
 	alignmentGroup->addAction(onAction);
 	alignmentGroup->addAction(selectedAction);
 
+	filterable->setVisibilityPredicate(hasLineOfSight);
 	onAction->setChecked(true);
 
 	return menu;
 }
 
-void MainWindow::addViewportMenuActions(QMenu& menu)
+void MainWindow::addViewportMenuActions()
 {
-	addVisibilityFilterableSubMenu(menu, "Labels", mVisNameLabels.get());
-	addVisibilityFilterableSubMenu(menu, "Forces", mForcesVisBinding.get());
-	addVisibilityFilterableSubMenu(menu, "Orbits", mVisOrbits.get());
+	addVisibilityFilterableSubMenu("Labels", mVisNameLabels.get());
+	addVisibilityFilterableSubMenu("Forces", mForcesVisBinding.get());
+	addVisibilityFilterableSubMenu("Orbits", mVisOrbits.get());
 }
 
 glm::dmat4 MainWindow::calcCurrentViewProjTransform() const

@@ -24,7 +24,6 @@ class OsgWidget;
 class QAction;
 class QComboBox;
 class QModelIndex;
-class QwtPlot;
 class PropertyEditor;
 class TreeItem;
 class WorldTreeWidget;
@@ -51,7 +50,14 @@ public:
 	void addToolWindow(const QString& windowName, QWidget* window);
 	void raiseToolWindow(QWidget* widget);
 
-	QMenu* addVisibilityFilterableSubMenu(QMenu& parent, const QString& text, skybolt::EntityVisibilityFilterable* filterable) const;
+	QMenu* addVisibilityFilterableSubMenu(const QString& text, skybolt::EntityVisibilityFilterable* filterable) const;
+
+	std::optional<PickedSceneObject> pickSceneObjectAtPointInWindow(const QPointF& position, const EntitySelectionPredicate& predicate = &EntitySelectionPredicateAlways) const;
+	std::optional<skybolt::sim::Vector3> pickPointOnPlanetAtPointInWindow(const QPointF& position) const;
+
+	using ViewportClickHandler = std::function<void(Qt::MouseButton button, const QPointF& position)>;
+	ViewportClickHandler getDefaultViewportClickHandler();
+	void setViewportClickHandler(ViewportClickHandler handler) { mViewportClickHandler = std::move(handler); }
 
 public slots:
 	void newScenario();
@@ -78,14 +84,21 @@ private slots:
 
 	void showContextMenu(const QPoint& point);
 
+protected:
+	virtual void loadProject(const QJsonObject& json);
+	virtual void saveProject(QJsonObject& json) const;
+
+	virtual void update();
+
+	virtual void setSelectedEntity(std::weak_ptr<skybolt::sim::Entity> entity);
+	virtual void setPropertiesModel(PropertiesModelPtr properties);
+
 private:
 	void onEvent(const skybolt::Event& event) override;
 
-	void update();
-
 private:
 	void loadViewport(const QJsonObject& json);
-	QJsonObject saveViewport();
+	QJsonObject saveViewport() const;
 
 	void setCamera(const skybolt::sim::EntityPtr& simCamera);
 	QToolBar * createViewportToolBar();
@@ -94,12 +107,9 @@ private:
 
 	void setProjectFilename(const QString& filename);
 
-	void addViewportMenuActions(QMenu& menu);
+	void addViewportMenuActions();
 
 	void setCameraTarget(skybolt::sim::Entity* target);
-
-	void setSelectedEntity(skybolt::sim::Entity* entity);
-	void setPropertiesModel(PropertiesModelPtr properties);
 
 	glm::dmat4 calcCurrentViewProjTransform() const;
 
@@ -140,7 +150,6 @@ private:
 	std::unique_ptr<skybolt::ForcesVisBinding> mForcesVisBinding;
 	skybolt::sim::EntityPtr mCurrentSimCamera;
 
-	QwtPlot* mPlot = nullptr;
 	OsgWidget* mOsgWidget = nullptr;
 	WorldTreeWidget* mWorldTreeWidget = nullptr;
 
@@ -151,7 +160,8 @@ private:
 	std::vector<EditorPluginPtr> mPlugins;
 
 	osg::ref_ptr<skybolt::vis::RenderCameraViewport> mViewport;
+	ViewportClickHandler mViewportClickHandler = getDefaultViewportClickHandler();
 	osg::ref_ptr<skybolt::vis::RenderOperation> mRenderOperationVisualization;
 
-	skybolt::sim::Entity* mSelectedEntity = nullptr;
+	std::weak_ptr<skybolt::sim::Entity> mSelectedEntity;
 };

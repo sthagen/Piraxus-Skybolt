@@ -10,6 +10,7 @@
 #include <SkyboltEngine/WindowUtil.h>
 #include <SkyboltEngine/SimVisBinding/CameraSimVisBinding.h>
 #include <SkyboltEngine/SimVisBinding/SimVisSystem.h>
+#include <SkyboltEngine/VisObjectsComponent.h>
 #include <SkyboltSim/Entity.h>
 #include <SkyboltSim/World.h>
 #include <SkyboltSim/CameraController/CameraController.h>
@@ -29,6 +30,9 @@
 #include <SkyboltCommon/Math/Box3.h>
 
 #include <SkyboltVis/Rect.h>
+#include <SkyboltVis/VisRoot.h>
+#include <SkyboltVis/Renderable/Planet/Planet.h>
+#include <SkyboltVis/Renderable/Water/WaterMaterial.h>
 #include <SkyboltVis/RenderOperation/DefaultRenderCameraViewport.h>
 #include <SkyboltVis/RenderOperation/RenderOperationSequence.h>
 #include <SkyboltVis/Window/CaptureScreenshot.h>
@@ -102,6 +106,17 @@ static Vector3 normalizeFunc(const Vector3& v)
 	return glm::normalize(v);
 }
 
+static void setWaveHeight(sim::Entity& entity, double height)
+{
+	if (vis::Planet* planet = getFirstVisObject<vis::Planet>(entity).get(); planet)
+	{
+		if (const auto& material = planet->getWaterMaterial(); material)
+		{
+			material->setWaveHeight(height);
+		}
+	}
+}
+
 static bool attachCameraToWindowWithEngine(sim::Entity& camera, vis::Window& window, EngineRoot& engineRoot)
 {
 	vis::CameraPtr visCamera = getVisCamera(camera);
@@ -123,15 +138,19 @@ static void stepSim(EngineRoot& engineRoot, double dt)
 	stepper.step(args);
 }
 
-static bool render(EngineRoot& engineRoot, vis::Window& window, vis::LoadTimingPolicy loadTimingPolicy)
+static bool render(EngineRoot& engineRoot, vis::VisRoot& visRoot)
 {
 	stepSim(engineRoot, 0.0); // FIXME: We need to call this to update all the systems prior to rendering, but we don't actually need to 'step'.
-	return window.render(loadTimingPolicy);
+	return visRoot.render();
 }
 
-static py::array_t<std::uint8_t> captureScreenshotToImage(vis::Window& window)
+static py::array_t<std::uint8_t> captureScreenshotToImage(vis::VisRoot& visRoot)
 {
-	osg::ref_ptr<osg::Image> image = vis::captureScreenshot(window);
+	osg::ref_ptr<osg::Image> image = vis::captureScreenshot(visRoot);
+	if (!image)
+	{
+		throw std::runtime_error("Could not capture screenshot");
+	}
 
 	const int channelCount = image->getPixelSizeInBits() / 8;
 	const std::size_t size = image->s() * image->t() * channelCount;
@@ -314,12 +333,18 @@ PYBIND11_MODULE(skybolt, m) {
 		.def_property_readonly("entityFactory", [](const EngineRoot& r) {return r.entityFactory.get(); }, py::return_value_policy::reference_internal)
 		.def_property_readonly("scenario", [](const EngineRoot& r) {return &r.scenario; }, py::return_value_policy::reference_internal);
 
-	py::class_<vis::Window>(m, "Window");
+	py::class_<vis::VisRoot>(m, "VisRoot")
+		.def(py::init())
+		.def("addWindow", &vis::VisRoot::addWindow)
+		.def("removeWindow", &vis::VisRoot::removeWindow)
+		.def("setLoadTimingPolicy", &vis::VisRoot::setLoadTimingPolicy);
 
-	py::class_<vis::StandaloneWindow, vis::Window>(m, "StandaloneWindow")
+	py::class_<vis::Window, std::shared_ptr<vis::Window>>(m, "Window");
+
+	py::class_<vis::StandaloneWindow, std::shared_ptr<vis::StandaloneWindow>, vis::Window>(m, "StandaloneWindow")
 		.def(py::init<vis::RectI>());
 
-	py::class_<vis::OffscreenWindow, vis::Window>(m, "OffscreenWindow")
+	py::class_<vis::OffscreenWindow, std::shared_ptr<vis::OffscreenWindow>, vis::Window>(m, "OffscreenWindow")
 		.def(py::init<int, int>()); // width, height
 
 	py::enum_<vis::LoadTimingPolicy>(m, "LoadTimingPolicy")
@@ -332,7 +357,7 @@ PYBIND11_MODULE(skybolt, m) {
 	m.def("createEngineRootWithDefaults", &createEngineRootWithDefaults, "Create an EngineRoot with default values");
 	m.def("attachCameraToWindowWithEngine", &attachCameraToWindowWithEngine);
 	m.def("stepSim", &stepSim);
-	m.def("render", &render, py::arg("engineRoot"), py::arg("window"), py::arg("loadTimingPolicy") = vis::LoadTimingPolicy::LoadBeforeRender);
+	m.def("render", &render, py::arg("engineRoot"), py::arg("window"));
 	m.def("toGeocentricPosition", [](const PositionPtr& position) { return std::make_shared<GeocentricPosition>(toGeocentric(*position)); });
 	m.def("toGeocentricOrientation", [](const OrientationPtr& orientation, const LatLon& latLon) { return std::make_shared<GeocentricOrientation>(toGeocentric(*orientation, latLon)); });
 	m.def("toLatLonAlt", [](const PositionPtr& position) { return std::make_shared<LatLonAltPosition>(toLatLonAlt(*position)); });
@@ -342,9 +367,10 @@ PYBIND11_MODULE(skybolt, m) {
 	m.def("cross", &crossFunc);
 	m.def("normalize", &normalizeFunc);
 	m.def("quaternionFromEuler", py::overload_cast<const Vector3&>(&math::quatFromEuler));
-	m.def("captureScreenshot", [](vis::Window& window) { return captureScreenshotToImage(window); });
-	m.def("captureScreenshot", [](vis::Window& window, const std::string& filename) { return vis::captureScreenshot(window, filename); });
+	m.def("captureScreenshot", [](vis::VisRoot& visRoot) { return captureScreenshotToImage(visRoot); });
+	m.def("captureScreenshot", [](vis::VisRoot& visRoot, const std::string& filename) { return vis::captureScreenshot(visRoot, filename); });
 	m.def("moveDistanceAndBearing", &moveDistanceAndBearing);
 	m.def("transformToScreenSpace", &transformToScreenSpace);
 	m.def("findObjectByName", &findObjectByName);
+	m.def("setWaveHeight", &setWaveHeight);
 }

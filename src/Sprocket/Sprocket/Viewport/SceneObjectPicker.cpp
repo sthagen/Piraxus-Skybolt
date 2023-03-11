@@ -1,3 +1,9 @@
+/* Copyright 2012-2020 Matthew Reid
+ *
+ * This Source Code Form is subject to the terms of the Mozilla Public
+ * License, v. 2.0. If a copy of the MPL was not distributed with this
+ * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
+
 #include "SceneObjectPicker.h"
 #include <SkyboltSim/World.h>
 #include <SkyboltSim/WorldUtil.h>
@@ -24,7 +30,7 @@ glm::dmat4 makeViewProjTransform(const sim::Vector3& origin, const sim::Quaterni
 
 sim::Vector3 screenToWorldDirection(const sim::Vector3& origin, const glm::dmat4& invViewProjTransform, const glm::vec2& pointNdc)
 {
-	glm::vec4 point(pointNdc.x * 2.0 - 1.0, pointNdc.y * 2.0 - 1.0, 0.99, 1);
+	glm::vec4 point(pointNdc.x * 2.0 - 1.0, 1.0 - pointNdc.y * 2.0, 0.99, 1);
 	point = invViewProjTransform * point;
 	point.x /= point.w;
 	point.y /= point.w;
@@ -52,28 +58,31 @@ std::optional<sim::Vector3> pickPointOnPlanet(const skybolt::sim::World& world, 
 
 SceneObjectPicker createSceneObjectPicker(const sim::World* world)
 {
-	return [world](const glm::dmat4& viewProjTransform, const glm::vec2& pointNdc, float pickRadiusNdc) -> std::optional<PickedSceneObject> {
+	return [world](const glm::dmat4& viewProjTransform, const glm::vec2& pointNdc, float pickRadiusNdc, const EntitySelectionPredicate& predicate) -> std::optional<PickedSceneObject> {
 
 		std::optional<PickedSceneObject> pickedObject;
 		float pickedEntityDistance = pickRadiusNdc;
 
 		for (const auto& entity : world->getEntities())
 		{
-			if (auto position = getPosition(*entity); position)
+			if (!predicate || predicate(*entity))
 			{
-				glm::dvec4 entityPoint = viewProjTransform * glm::dvec4(*position, 1.0);
-				if (entityPoint.z > 0)
+				if (auto position = getPosition(*entity); position)
 				{
-					glm::vec2 entityPointNdc(entityPoint.x / entityPoint.w, -entityPoint.y / entityPoint.w);
-					entityPointNdc = entityPointNdc * 0.5f + glm::vec2(0.5f);
-					float distance = glm::distance(entityPointNdc, pointNdc);
-					if (distance < pickedEntityDistance)
+					glm::dvec4 entityPoint = viewProjTransform * glm::dvec4(*position, 1.0);
+					if (entityPoint.z > 0)
 					{
-						pickedObject = PickedSceneObject({
-							entity,
-							*position
-							});
-						pickedEntityDistance = distance;
+						glm::vec2 entityPointNdc(entityPoint.x / entityPoint.w, -entityPoint.y / entityPoint.w);
+						entityPointNdc = entityPointNdc * 0.5f + glm::vec2(0.5f);
+						float distance = glm::distance(entityPointNdc, pointNdc);
+						if (distance < pickedEntityDistance)
+						{
+							pickedObject = PickedSceneObject({
+								entity,
+								*position
+								});
+							pickedEntityDistance = distance;
+						}
 					}
 				}
 			}

@@ -62,8 +62,8 @@ void RenderTarget::updatePreRender(const RenderContext& context)
 	RectF rect(
 		mRect.x * context.targetDimensions.x(),
 		mRect.y * context.targetDimensions.y(),
-		mRect.width * context.targetDimensions.x(),
-		mRect.height * context.targetDimensions.y());
+		std::ceil(mRect.width * context.targetDimensions.x()), // ceil to ensure required width is covered
+		std::ceil(mRect.height * context.targetDimensions.y()));
 
 	osg::StateSet* ss = mOsgCamera->getOrCreateStateSet();
 	mRcpWindowSizeInPixelsUniform->set(osg::Vec2f(1.0f / rect.width, 1.0f / rect.height));
@@ -73,8 +73,6 @@ void RenderTarget::updatePreRender(const RenderContext& context)
 
 	if (mCamera)
 	{
-		mCamera->setAspectRatio((float)context.targetDimensions.x() / (float)context.targetDimensions.y());
-
 		mCamera->updateOsgCameraGeometry(*mOsgCamera);
 	}
 }

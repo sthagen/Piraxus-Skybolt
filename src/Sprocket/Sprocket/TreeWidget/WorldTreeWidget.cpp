@@ -7,11 +7,12 @@
 #include "WorldTreeWidget.h"
 #include "IconFactory.h"
 
-#include <SkyboltEngine/Scenario.h>
 #include <SkyboltEngine/EntityFactory.h>
+#include <SkyboltEngine/Scenario/Scenario.h>
 #include <SkyboltSim/Components/NameComponent.h>
 #include <SkyboltSim/Components/ParentReferenceComponent.h>
 #include <SkyboltSim/Components/ProceduralLifetimeComponent.h>
+#include <SkyboltCommon/MapUtility.h>
 
 #include <QDialogButtonBox>
 #include <QFileDialog>
@@ -207,22 +208,22 @@ WorldTreeWidget::WorldTreeWidget(const WorldTreeWidgetConfig& config) :
 
 	TreeItemPtr rootItem(new RootItem(getDefaultIconFactory().createIcon(IconFactory::Icon::Folder)));
 	mModel = new TreeItemModel(rootItem, this);
-	QTreeView* view = new QTreeView;
-	view->setModel(mModel);
-	view->setContextMenuPolicy(Qt::CustomContextMenu);
-	connect(view, &QTreeView::customContextMenuRequested, this, [=](const QPoint& point) {
-		QModelIndex index = view->indexAt(point);
+	mView = new QTreeView;
+	mView->setModel(mModel);
+	mView->setContextMenuPolicy(Qt::CustomContextMenu);
+	connect(mView, &QTreeView::customContextMenuRequested, this, [=](const QPoint& point) {
+		QModelIndex index = mView->indexAt(point);
 		TreeItem* item = mModel->getTreeItem(index);
 		if (item)
 		{
-			showContextMenu(*item, view->mapToGlobal(point));
+			showContextMenu(*item, mView->mapToGlobal(point));
 		}
 	});
 
 	layout()->addWidget(toolbar);
-	layout()->addWidget(view);
+	layout()->addWidget(mView);
 
-	QObject::connect(view->selectionModel(), &QItemSelectionModel::currentChanged, [=](const QModelIndex& current, const QModelIndex& previous)
+	QObject::connect(mView->selectionModel(), &QItemSelectionModel::currentChanged, [=](const QModelIndex& current, const QModelIndex& previous)
 	{
 		const TreeItem* item = mModel->getTreeItem(current);
 		if (item)
@@ -232,7 +233,7 @@ WorldTreeWidget::WorldTreeWidget(const WorldTreeWidgetConfig& config) :
 		}
 	});
 
-	QObject::connect(view, &QTreeView::clicked, [=](const QModelIndex& current)
+	QObject::connect(mView, &QTreeView::clicked, [=](const QModelIndex& current)
 	{
 		const TreeItem* item = mModel->getTreeItem(current);
 		if (item)
@@ -243,13 +244,13 @@ WorldTreeWidget::WorldTreeWidget(const WorldTreeWidgetConfig& config) :
 
 	QObject::connect(deleteButton, &QToolButton::pressed, [=]()
 	{
-		QModelIndex index = view->selectionModel()->currentIndex();
+		QModelIndex index = mView->selectionModel()->currentIndex();
 		if (index.isValid())
 		{
 			TreeItem* baseItem = mModel->getTreeItem(index);
 			if (EntityTreeItem* item = dynamic_cast<EntityTreeItem*>(baseItem))
 			{
-				mWorld->removeEntity(item->data);
+				mWorld->removeEntity(item->data.lock().get());
 			}
 			else
 			{
@@ -291,8 +292,12 @@ WorldTreeWidget::WorldTreeWidget(const WorldTreeWidgetConfig& config) :
 	mEntityRootItem = std::make_shared<SimpleTreeItem>(folderIcon, "Entities", config.scenario);
 	mModel->addChildren(*scenarioItem, { mEntityRootItem });
 
-	updateEntityItems();
-	view->expandAll();
+	for (const auto& entity : mWorld->getEntities())
+	{
+		entityAdded(entity);
+	}
+
+	mView->expandAll();
 }
 
 WorldTreeWidget::~WorldTreeWidget()
@@ -311,16 +316,19 @@ WorldTreeWidget::~WorldTreeWidget()
 	}
 }
 
-void WorldTreeWidget::update()
+void WorldTreeWidget::setSelectedEntity(const skybolt::sim::Entity* entity)
 {
-	if (mDirty)
+	if (auto i = findOptional(mEntityTreeItems, entity); i)
 	{
-		updateEntityItems();
-		mDirty = false;
+		setCurrentSelection({(*i).get()});
+	}
+	else
+	{
+		setCurrentSelection({});
 	}
 }
 
-std::shared_ptr<EntityTreeItem> createEntityTreeItem(sim::Entity* entity)
+static std::shared_ptr<EntityTreeItem> createEntityTreeItem(const sim::EntityPtr& entity)
 {
 	std::string name = getName(*entity);
 	if (!name.empty())
@@ -331,47 +339,8 @@ std::shared_ptr<EntityTreeItem> createEntityTreeItem(sim::Entity* entity)
 	return nullptr;
 }
 
-void WorldTreeWidget::updateEntityItems()
-{
-	mModel->clearChildren(*mEntityRootItem);
-
-	std::map<sim::Entity*, std::vector<sim::Entity*>> itemChildren;
-	std::map<sim::Entity*, TreeItemPtr> items;
-	items[nullptr] = mEntityRootItem;
-
-	// Add entities
-	{
-		const sim::World::Entities& entities = mWorld->getEntities();
-		for (const sim::EntityPtr& entity : entities)
-		{
-			auto item = createEntityTreeItem(entity.get());
-			if (item)
-			{
-				sim::Entity* parent = getParent(*entity);
-				itemChildren[parent].push_back(entity.get());
-				items[entity.get()] = item;
-			}
-		}
-
-		for (const auto v : itemChildren)
-		{
-			auto parentIt = items.find(v.first);
-			if (parentIt != items.end())
-			{
-				std::vector<TreeItemPtr> children;
-				for (Entity* child : v.second)
-				{
-					children.push_back(items[child]);
-				}
-
-				mModel->addChildren(*parentIt->second, children);
-			}
-		}
-	}
-}
-
 template <typename T>
-std::vector<T> toVector(const std::set<T>& s)
+static std::vector<T> toVector(const std::set<T>& s)
 {
 	std::vector<T> r;
 	r.insert(r.end(), s.begin(), s.end());
@@ -384,23 +353,88 @@ void WorldTreeWidget::setItemsUnderParent(TreeItem& parent, const Registry<TreeI
 	mModel->addChildren(parent, toVector(registry.getItems()));
 }
 
+TreeItemPtr WorldTreeWidget::getParentTreeItem(const sim::Entity& entity) const
+{
+	TreeItemPtr parent = mEntityRootItem;
+	if (sim::Entity* parentEntity = getParent(entity); parentEntity)
+	{
+		if (auto i = mEntityTreeItems.find(parentEntity); i != mEntityTreeItems.end())
+		{
+			parent = i->second;
+		}
+	}
+	return parent;
+}
+
+std::vector<TreeItem*> WorldTreeWidget::getCurrentSelection() const
+{
+	QModelIndexList selected = mView->selectionModel()->selectedIndexes();
+	std::vector<TreeItem*> r;
+	for (auto i : selected)
+	{
+		if (TreeItem* item = mModel->getTreeItem(i); item)
+		{
+			r.push_back(item);
+		}
+	}
+	return r;
+}
+
+void WorldTreeWidget::setCurrentSelection(std::vector<TreeItem*> items)
+{
+	if (getCurrentSelection() != items)
+	{
+		QItemSelection selected;
+		for (const auto i : items)
+		{
+			selected.push_back(QItemSelectionRange(mModel->index(i)));
+		}
+
+		mView->selectionModel()->select(selected, QItemSelectionModel::ClearAndSelect);
+	}
+}
+
 void WorldTreeWidget::entityAdded(const sim::EntityPtr& entity)
 {
 	entity->addListener(this);
-	mDirty = true;
+
+	std::shared_ptr<EntityTreeItem> item = createEntityTreeItem(entity);
+	if (item)
+	{
+		mEntityTreeItems[entity.get()] = item;
+
+		TreeItemPtr parent = getParentTreeItem(*entity);
+		mModel->addChildren(*parent, {item});
+	}
+
+	updateTreeItemParents();
 }
 
 void WorldTreeWidget::entityRemoved(const sim::EntityPtr& entity)
 {
 	entity->removeListener(this);
-	mDirty = true;
+
+	std::vector<TreeItem*> selection = getCurrentSelection();
+
+	if (auto i = mEntityTreeItems.find(entity.get()); i != mEntityTreeItems.end())
+	{
+		if (TreeItem* parent = mModel->getParent(*i->second); parent)
+		{
+			mModel->removeChild(*parent, *i->second);
+		}
+		mEntityTreeItems.erase(i);
+	}
+
+	updateTreeItemParents();
+	
+	setCurrentSelection(selection); // Selection can change after removing item, so we need to restore it here.
 }
 
 void WorldTreeWidget::onComponentAdded(Entity* entity, Component* component)
 {
 	if (dynamic_cast<ParentReferenceComponent*>(component))
 	{
-		mDirty = true;
+		updateTreeItemParents();
 	}
 }
 
@@ -408,8 +442,27 @@ void WorldTreeWidget::onComponentRemove(Entity* entity, Component* component)
 {
 	if (dynamic_cast<ParentReferenceComponent*>(component))
 	{
-		mDirty = true;
+		updateTreeItemParents();
 	}
+}
+
+void WorldTreeWidget::updateTreeItemParents()
+{
+	std::vector<TreeItem*> selection = getCurrentSelection();
+
+	for (const auto& [entity, item] : mEntityTreeItems)
+	{
+		TreeItemPtr parent = getParentTreeItem(*entity);
+		assert(parent);
+		TreeItem* currentParent = mModel->getParent(*item);
+		if (currentParent != parent.get())
+		{
+			mModel->removeChild(*currentParent, *item);
+			mModel->addChildren(*parent, {item});
+		}
+	}
+
+	setCurrentSelection(selection); // Selection can change after removing item, so we need to restore it here.
 }
 
 const TreeItemType* WorldTreeWidget::findItemType(const TreeItem& item) const
@@ -429,7 +482,10 @@ bool WorldTreeWidget::isDeletable(const TreeItem& item) const
 {
 	if (const EntityTreeItem* entityTreeItem = dynamic_cast<const EntityTreeItem*>(&item))
 	{
-		return !entityTreeItem->data->getFirstComponent<sim::ProceduralLifetimeComponent>().get();
+		if (auto e = entityTreeItem->data.lock(); e)
+		{
+			return !e->getFirstComponent<sim::ProceduralLifetimeComponent>().get();
+		}
 	}
 
 	return true;
