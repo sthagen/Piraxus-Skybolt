@@ -128,6 +128,9 @@ DefaultRenderCameraViewport::DefaultRenderCameraViewport(const DefaultRenderCame
 		addShadowMapsToStateSet(mShadowMapGenerator->getTextures(), *ss, int(GlobalSamplerUnit::ShadowCascade0));
 	}
 
+	// Main pass
+	mSequence->addOperation(mMainPassTexture, (int)RenderOperationOrder::MainPass);
+
 	// Clouds
 	osg::ref_ptr<RenderOperation> cloudsTarget;
 	{
@@ -150,13 +153,17 @@ DefaultRenderCameraViewport::DefaultRenderCameraViewport(const DefaultRenderCame
 			upscalingConfig.scene = mScene;
 			upscalingConfig.upscalingProgram = config.programs->getRequiredProgram("cloudsTemporalUpscaling");
 			mCloudsUpscaling = new CloudsTemporalUpscaling(upscalingConfig);
+
+			mSequence->addOperation(createRenderOperationFunction([this] (const RenderContext& context) {
+				mCloudsUpscaling->getOrCreateStateSet()->setTextureAttribute(4, mMainPassTexture->getDepthTexture());
+			}), (int)RenderOperationOrder::Clouds);
+			mCloudsUpscaling->getOrCreateStateSet()->addUniform(createUniformSampler2d("sceneDepthSampler", 4));
+
 			mSequence->addOperation(mCloudsUpscaling, (int)RenderOperationOrder::Clouds);
 
 			cloudsTarget = mCloudsUpscaling;
 		}
 	}
-
-	mSequence->addOperation(mMainPassTexture, (int)RenderOperationOrder::MainPass);
 
 	mSequence->addOperation(createRenderOperationFunction([this, cloudsTarget] (const RenderContext& context) {
 		if (!mMainPassTexture->getOutputTextures().empty())
