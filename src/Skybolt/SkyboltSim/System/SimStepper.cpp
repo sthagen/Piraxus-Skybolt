@@ -11,67 +11,74 @@
 namespace skybolt {
 namespace sim {
 
-const double SimStepper::msDynamicsStepSize = 1.0 / 60.0;
-
 SimStepper::SimStepper(const SystemRegistryPtr& systems) :
 	mSystems(systems)
 {
 	assert(mSystems);
 }
 
-SimStepper::~SimStepper()
+SimStepper::~SimStepper() = default;
+
+void SimStepper::setTime(SecondsD t)
 {
+	mCurrentTime = t;
 }
 
-void SimStepper::step(const System::StepArgs& args)
+void SimStepper::step(SecondsD dt)
 {
 	auto systems = *mSystems; // Take copy in case a system adds/removes another system during step
 
-	for (const SystemPtr& system : systems)
+	updateSystem(systems, UpdateStage::Input);
+	updateSystem(systems, UpdateStage::BeginStateUpdate);
+
+	if (mDynamicsEnabled && dt > 0)
 	{
-		system->updatePreDynamics(args);
+		updateDynamicsStep(systems, dt);
 	}
 
-	updateDynamicsStep(args);
-
-	for (const SystemPtr& system : systems)
-	{
-		system->updatePostDynamics(args);
-	}
+	updateSystem(systems, UpdateStage::EndStateUpdate);
+	updateSystem(systems, UpdateStage::Attachments);
+	updateSystem(systems, UpdateStage::Output);
 }
 
-void SimStepper::updateDynamicsStep(const System::StepArgs& args)
+void SimStepper::updateDynamicsStep(const std::vector<SystemPtr>& systems, SecondsD dt)
 {
-	// Calculate required number of substeps
-	double newStepTimer = mStepTimer + (double)args.dtSim;
+	assert(mDynamicsEnabled);
 
-	int requiredSteps = int(newStepTimer / msDynamicsStepSize);
-	if (requiredSteps > msMaxDynamicsSubsteps)
+	// Calculate required number of substeps
+	double newStepTimer = mStepTimer + dt;
+
+	int requiredSteps = int(newStepTimer / mDynamicsStepSize);
+	if (mMaxDynamicsSubsteps && requiredSteps > *mMaxDynamicsSubsteps)
 	{
-		requiredSteps = msMaxDynamicsSubsteps;
-		double dt = (double)msMaxDynamicsSubsteps * msDynamicsStepSize;
+		requiredSteps = *mMaxDynamicsSubsteps;
+		double dt = (double)*mMaxDynamicsSubsteps * mDynamicsStepSize;
 		newStepTimer = mStepTimer + dt;
 	}
 
-	mStepTimer = newStepTimer - requiredSteps * msDynamicsStepSize;
+	mStepTimer = newStepTimer - requiredSteps * mDynamicsStepSize;
 
 	// Perform substeps
 	for (int i = 0; i < requiredSteps; i++)
 	{
-		for (const SystemPtr& system : *mSystems)
-		{
-			system->updatePreDynamicsSubstep(msDynamicsStepSize);
-		}
+		updateSystem(systems, UpdateStage::PreDynamicsSubStep);
 
 		for (const SystemPtr& system : *mSystems)
 		{
-			system->updateDynamicsSubstep(msDynamicsStepSize);
+			system->advanceSimTime(mCurrentTime, mDynamicsStepSize);
 		}
+		updateSystem(systems, UpdateStage::DynamicsSubStep);
+		updateSystem(systems, UpdateStage::PostDynamicsSubStep);
 
-		for (const SystemPtr& system : *mSystems)
-		{
-			system->updatePostDynamicsSubstep(msDynamicsStepSize);
-		}
+		mCurrentTime += mDynamicsStepSize;
+	}
+}
+
+void SimStepper::updateSystem(const std::vector<SystemPtr>& systems, UpdateStage stage)
+{
+	for (const SystemPtr& system : systems)
+	{
+		system->update(stage);
 	}
 }
 

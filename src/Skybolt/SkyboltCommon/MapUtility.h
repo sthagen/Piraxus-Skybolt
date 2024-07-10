@@ -22,19 +22,15 @@ std::optional<ValueT> findOptional(const std::map<KeyT, ValueT>& m, const KeyT& 
 	return std::nullopt;
 }
 
-template <typename ContainerT, typename PredicateT>
-void removeIf(ContainerT& items, const PredicateT& predicate) {
-	for (auto it = items.begin(); it != items.end(); )
+template <typename KeyT, typename ValueT>
+std::vector<ValueT> toValuesVector(const std::map<KeyT, ValueT>& m)
+{
+	std::vector<ValueT> r;
+	for (const auto& i : m)
 	{
-		if (predicate(*it))
-		{
-			it = items.erase(it);
-		}
-		else
-		{
-			++it;
-		}
+		r.push_back(i.second);
 	}
+	return r;
 }
 
 } // namespace skybolt

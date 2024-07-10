@@ -7,6 +7,7 @@
 
 #include "PlanetCameraController.h"
 #include "SkyboltSim/Entity.h"
+#include "SkyboltSim/World.h"
 #include "SkyboltSim/Components/Node.h"
 #include "SkyboltSim/Components/CameraComponent.h"
 #include "SkyboltSim/Components/PlanetComponent.h"
@@ -16,72 +17,80 @@
 
 #include <assert.h>
 
-using namespace skybolt::sim;
-using namespace skybolt;
+namespace skybolt::sim {
 
-const float PlanetCameraController::msYawRate = 0.01f;
-const float PlanetCameraController::msPitchRate = 0.01f;
-const float PlanetCameraController::msZoomRate = 0.0002f;
+const float PlanetCameraController::msYawRate = 1.f;
+const float PlanetCameraController::msPitchRate = 1.f;
+const float PlanetCameraController::msZoomRate = 0.2f;
+constexpr float pitchControlSensitivity = 2.f;
 
-PlanetCameraController::PlanetCameraController(sim::Entity* camera, const Params& params) :
+SKYBOLT_REFLECT_BEGIN(PlanetCameraController)
+{
+	registry.type<PlanetCameraController>("PlanetCameraController")
+		.superType<CameraController>()
+		.superType<LatLonSettable>()
+		.superType<Pitchable>()
+		.superType<Targetable>()
+		.superType<Zoomable>();
+}
+SKYBOLT_REFLECT_END
+
+PlanetCameraController::PlanetCameraController(sim::Entity* camera, World* world, const Params& params) :
 	CameraController(camera),
+	Targetable(world),
 	mParams(params)
 {
 	setPitch(skybolt::math::halfPiF());
 	mCameraComponent->getState().fovY = mParams.fovY;
 }
 
-void PlanetCameraController::update(float dt)
+void PlanetCameraController::update(SecondsD dt)
 {
-	if (!mTarget)
+	if (Entity* target = getTarget(); target)
 	{
-		return;
+		auto position = getPosition(*target);
+		auto orientation = getOrientation(*target);
+		auto planet = target->getFirstComponent<PlanetComponent>();
+		if (!position || !orientation || !planet)
+		{
+			return;
+		}
+
+		float yawDelta = msYawRate * mInput.yawRate * dt;
+		float pitchDelta = msPitchRate * mInput.tiltRate * dt;
+		float zoomDelta = (mInput.zoomRate + mInput.forwardSpeed) * dt * msZoomRate;
+		mZoom = skybolt::math::clamp(mZoom + zoomDelta, 0.0, 1.0);
+		float maxDistance = mParams.maxDistOnRadius * planet->radius;
+
+		// Zoom control
+		float exponent = log(maxDistance - (float)planet->radius);
+		float distFromSurface = exp(exponent * (1 - mZoom));
+
+		// Orientation control
+		if (mInput.modifier1Pressed)
+		{
+			mPitch -= (double)pitchDelta * pitchControlSensitivity;
+			mPitch = skybolt::math::clamp<float>((float)mPitch, 0, skybolt::math::halfPiF());
+		}
+		else
+		{
+			float fovHeightAtPlanetSurfaceInMeters = 2.0f * std::tan(mParams.fovY * 0.5f) * distFromSurface;
+			float planetSurfaceVisibleVerticalArcInRadians = fovHeightAtPlanetSurfaceInMeters / planet->radius;
+
+			mLatLon.lon -= planetSurfaceVisibleVerticalArcInRadians * yawDelta;
+			mLatLon.lat -= planetSurfaceVisibleVerticalArcInRadians * pitchDelta;
+			mLatLon.lat = skybolt::math::clamp<double>(mLatLon.lat, -skybolt::math::halfPiD(), skybolt::math::halfPiD());
+		}
+
+		Quaternion orientationRelPlanet = *orientation * latLonToGeocentricLtpOrientation(mLatLon) * glm::angleAxis(skybolt::math::halfPiD(), Vector3(0, -1, 0));
+
+		mNodeComponent->setOrientation(orientationRelPlanet * glm::angleAxis(skybolt::math::halfPiD() - mPitch, Vector3(0, 1, 0)));
+
+		Vector3 surfacePosition = *position + orientationRelPlanet * Vector3(-planet->radius, 0, 0);
+
+		// Derive camera position
+		mNodeComponent->setPosition(surfacePosition + mNodeComponent->getOrientation() * Vector3(-distFromSurface, 0, 0));
 	}
-
-	auto position = getPosition(*mTarget);
-	auto orientation = getOrientation(*mTarget);
-	auto planet = mTarget->getFirstComponent<PlanetComponent>();
-	if (!position || !orientation || !planet)
-	{
-		return;
-	}
-
-	float yawDelta = msYawRate * mInput.panSpeed * dt;
-	float pitchDelta = msPitchRate * mInput.tiltSpeed * dt;
-	float zoomDelta = (mInput.zoomSpeed + mInput.forwardSpeed * 1000.f) * dt * msZoomRate;
-	mZoom = skybolt::math::clamp(mZoom + zoomDelta, 0.0f, 1.0f);
-
-	float maxDistance = mParams.maxDistOnRadius * (float)planet->radius;
-
-	// Zoom control
-	float exponent = log(maxDistance - (float)planet->radius);
-	float distFromSurface = exp(exponent * (1 - mZoom));
-
-	// Orientation control
-	if (mInput.modifier1Pressed)
-	{
-		mPitch -= (double)pitchDelta;
-		mPitch = skybolt::math::clamp<float>((float)mPitch, 0, skybolt::math::halfPiF());
-	}
-	else
-	{
-		float rotationSpeed = std::min(1.0f, distFromSurface / maxDistance);
-		mLatLon.lon -= yawDelta * rotationSpeed;
-		mLatLon.lat -= pitchDelta * rotationSpeed;
-		mLatLon.lat = skybolt::math::clamp<double>(mLatLon.lat, -skybolt::math::halfPiD(), skybolt::math::halfPiD());
-	}
-
-	Quaternion orientationRelPlanet = *orientation * latLonToGeocentricLtpOrientation(mLatLon) * glm::angleAxis(skybolt::math::halfPiD(), Vector3(0, -1, 0));
-
-	mNodeComponent->setOrientation(orientationRelPlanet * glm::angleAxis(skybolt::math::halfPiD() - mPitch, Vector3(0, 1, 0)));
-
-	Vector3 surfacePosition = *position + orientationRelPlanet * Vector3(-planet->radius, 0, 0);
-
-	// Derive camera position
-	mNodeComponent->setPosition(surfacePosition + mNodeComponent->getOrientation() * Vector3(-distFromSurface, 0, 0));
 }
 
-void PlanetCameraController::setTarget(Entity* target)
-{
-	CameraController::setTarget(target);
-}
+} // namespace skybolt::sim

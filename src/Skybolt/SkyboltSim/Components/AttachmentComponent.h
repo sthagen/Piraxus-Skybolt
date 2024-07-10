@@ -16,43 +16,38 @@ namespace sim {
 
 struct AttachmentParams
 {
-	std::string entityTemplate; //!< Type of entity to restrict attachments to. Leave empty to allow all types.
 	Vector3 positionRelBody;
 	Quaternion orientationRelBody;
 };
 
-class AttachmentComponent : public Component, public sim::EntityListener
+//! Component that attaches a child entity to a parent entity
+class AttachmentComponent : public Component
 {
 public:
-	AttachmentComponent(const AttachmentParams& params, Entity* parentObject);
+	AttachmentComponent(const AttachmentParams& params, const World* world, Entity* childEntity);
 	~AttachmentComponent();
 
-	void resetTarget(Entity* target = nullptr);
+	void setParentEntityId(const EntityId& target = nullEntityId());
+	const EntityId& getParentEntityId() const { return mParentEntityId; }
 
-	//! May return nullptr
-	Entity* getTarget() const { return mTarget; }
-
-	const std::string& getEntityTemplate() const { return mParams.entityTemplate; }
-
-	void updatePostDynamics(TimeReal dt, TimeReal dtWallClock) override;
+	SKYBOLT_BEGIN_REGISTER_UPDATE_HANDLERS
+		SKYBOLT_REGISTER_UPDATE_HANDLER(UpdateStage::Attachments, setTargetStateToParent)
+	SKYBOLT_END_REGISTER_UPDATE_HANDLERS
 
 	void setPositionRelBody(const Vector3& positionRelBody) { mParams.positionRelBody = positionRelBody; }
 	void setOrientationRelBody(const Quaternion& orientationRelBody) { mParams.orientationRelBody = orientationRelBody; }
 
 private:
-	void onDestroy(Entity* entity) override;
-
 	void setTargetStateToParent();
 
 private:
 	AttachmentParams mParams;
-	Entity* mParentObject;
-	Entity* mTarget;
-	EntityListener* mTargetListener;
-	ParentReferenceComponentPtr mParentReference;
+	const World* mWorld;
+	Entity* mChildEntity;
+	EntityId mParentEntityId = nullEntityId();
 };
 
-AttachmentComponentPtr getParentAttachment(const sim::Entity& entity);
+SKYBOLT_REFLECT_EXTERN(AttachmentComponent)
 
 } // namespace sim
 } // namespace skybolt

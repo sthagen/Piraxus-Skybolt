@@ -20,7 +20,7 @@ class Node : public Positionable, public Component
 public:
 	Node(const Vector3 &localPosition = math::dvec3Zero(), const Quaternion &localOrientation = math::dquatIdentity());
 
-	~Node();
+	~Node() override;
 
 	void setPosition(const Vector3 &position);
 	void setOrientation(const Quaternion &orientation);
@@ -32,6 +32,8 @@ private:
 	Vector3 mPosition;
 	Quaternion mOrientation;
 };
+
+SKYBOLT_REFLECT_EXTERN(Node)
 
 } // namespace sim
 } // namespace skybolt

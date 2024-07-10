@@ -5,106 +5,67 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "AttachmentComponent.h"
-#include "DynamicBodyComponent.h"
-#include "ParentReferenceComponent.h"
+#include "Motion.h"
+#include "SkyboltSim/World.h"
 
 #include <assert.h>
 
 namespace skybolt {
 namespace sim {
 
-AttachmentComponent::AttachmentComponent(const AttachmentParams& params, Entity* parentObject) :
+SKYBOLT_REFLECT_BEGIN(AttachmentComponent)
+{
+	registry.type<AttachmentComponent>("AttachmentComponent")
+		.superType<Component>()
+		.property("parentEntityId", &AttachmentComponent::getParentEntityId, &AttachmentComponent::setParentEntityId);
+}
+SKYBOLT_REFLECT_END
+
+AttachmentComponent::AttachmentComponent(const AttachmentParams& params, const World* world, Entity* childEntity) :
 	mParams(params),
-	mParentObject(parentObject),
-	mTarget(nullptr),
-	mTargetListener(nullptr)
+	mWorld(world),
+	mChildEntity(childEntity)
 {
-	assert(mParentObject);
+	assert(mWorld);
+	assert(mChildEntity);
 }
 
-AttachmentComponent::~AttachmentComponent()
+AttachmentComponent::~AttachmentComponent() = default;
+
+void AttachmentComponent::setParentEntityId(const EntityId& entityId)
 {
-	if (mTarget)
-	{
-		mTarget->removeListener(this);
-	}
-}
-
-void AttachmentComponent::resetTarget(Entity* target)
-{
-	auto parentBody = mParentObject->getFirstComponent<DynamicBodyComponent>();
-
-	// Remove previous target
-	if (mTarget)
-	{
-		mTarget->removeListener(this);
-		mTarget->removeComponent(mParentReference);
-	}
-
-	mTarget = target;
-
-	// Add new target
-	if (mTarget)
-	{
-		mParentReference = std::make_shared<ParentReferenceComponent>(mParentObject);
-		mTarget->addComponent(mParentReference);
-		mTarget->addListener(this);
-
-		setTargetStateToParent();
-	}
-}
-
-void AttachmentComponent::updatePostDynamics(TimeReal dt, TimeReal dtWallClock)
-{
+	mParentEntityId = entityId;
 	setTargetStateToParent();
 }
 
 void AttachmentComponent::setTargetStateToParent()
 {
-	if (mTarget)
+	if (mParentEntityId == nullEntityId())
+	{
+		return;
+	}
+
+	if (const EntityPtr& parentEntity = mWorld->getEntityById(mParentEntityId); parentEntity)
 	{
 		// Update position and orientation
-		auto optionalPosition = getPosition(*mTarget);
-		auto optionalOrientation = getOrientation(*mTarget);
+		auto optionalPosition = getPosition(*parentEntity);
+		auto optionalOrientation = getOrientation(*parentEntity);
 		if (optionalPosition && optionalOrientation)
 		{
-			setPosition(*mParentObject, *optionalPosition + *optionalOrientation * mParams.positionRelBody);
-			setOrientation(*mParentObject, *optionalOrientation * mParams.orientationRelBody);
+			setPosition(*mChildEntity, *optionalPosition + *optionalOrientation * mParams.positionRelBody);
+			setOrientation(*mChildEntity, *optionalOrientation * mParams.orientationRelBody);
 		}
 
 		// Update velocity
-		auto targetBody = mTarget->getFirstComponent<DynamicBodyComponent>();
-		if (targetBody)
+		if (auto childMotion = mChildEntity->getFirstComponent<Motion>(); childMotion)
 		{
-			auto parentBody = mParentObject->getFirstComponent<DynamicBodyComponent>();
-			if (parentBody)
+			if (auto parentMotion = parentEntity->getFirstComponent<Motion>())
 			{
-				targetBody->setLinearVelocity(parentBody->getLinearVelocity());
-				targetBody->setAngularVelocity(parentBody->getAngularVelocity());
+				childMotion->linearVelocity = parentMotion->linearVelocity;
+				childMotion->angularVelocity = parentMotion->angularVelocity;
 			}
 		}
 	}
-}
-
-void AttachmentComponent::onDestroy(Entity* entity)
-{
-	resetTarget(nullptr);
-}
-
-AttachmentComponentPtr getParentAttachment(const sim::Entity& entity)
-{
-	if (auto parentReferenceComponent = entity.getFirstComponent<ParentReferenceComponent>())
-	{
-		auto parent = parentReferenceComponent->getParent();
-		for (auto attachment : parent->getComponentsOfType<AttachmentComponent>())
-		{
-			if (attachment->getTarget() == &entity)
-			{
-				return attachment;
-			}
-		}
-	}
-	return nullptr;
 }
 
 } // namespace sim

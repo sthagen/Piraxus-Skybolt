@@ -206,13 +206,14 @@ struct MouseEvent : public Event
 		Button4,
 		Button5,
 		Button6,
-		Button7
+		Button7,
+		ButtonCount
 	};
 
 	Type type;
 	ButtonId buttonId;
-	glm::vec3 absState; //!< Mouse coordinates increase to bottom right
-	glm::vec3 relState;
+	glm::vec3 absState; //!< Absolute mouse coordinates in pixels, increasing towards bottom right.
+	glm::vec3 relState; //!< Relative mouse movement since last event in pixels, increasing towards bottom right.
 };
 
 class InputDevice
@@ -243,9 +244,6 @@ public:
 	virtual ~InputPlatform() {};
 
 	virtual void update() {};
-
-	virtual void setWindowWidth(int width) {};
-	virtual void setWindowHeight(int height) {};
 
 	virtual void setEnabled(bool enabled) = 0;
 

@@ -6,6 +6,10 @@
 
 #pragma once
 
+#include "SkyboltSim/PropertyMetadata.h"
+#include <SkyboltCommon/Units.h>
+#include <SkyboltReflection/Reflection.h>
+
 namespace skybolt {
 namespace sim {
 
@@ -19,6 +23,13 @@ public:
 protected:
 	double mPitch = 0;
 };
+
+SKYBOLT_REFLECT_BEGIN(Pitchable)
+{
+	registry.type<Pitchable>("Pitchable")
+		.property("pitch", &Pitchable::getPitch, &Pitchable::setPitch, {{PropertyMetadataNames::units, Units::Radians}});
+}
+SKYBOLT_REFLECT_END
 
 } // namespace sim
 } // namespace skybolt

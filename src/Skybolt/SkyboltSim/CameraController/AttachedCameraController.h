@@ -9,13 +9,14 @@
 
 #include "CameraController.h"
 #include "Pitchable.h"
+#include "Targetable.h"
 #include "Yawable.h"
 #include "Zoomable.h"
 
 namespace skybolt {
 namespace sim {
 
-class AttachedCameraController : public CameraController, public Pitchable, public Yawable, public Zoomable
+class AttachedCameraController : public CameraController, public Pitchable, public Targetable, public Yawable, public Zoomable
 {
 public:
 	struct Params
@@ -25,22 +26,25 @@ public:
 		std::string attachmentPointName;
 	};
 
-	AttachedCameraController(Entity* camera, const Params& params);
+	AttachedCameraController(Entity* camera, World* world, const Params& params);
 
 public: // CameraController interface
-	void update(float dt) override;
+	void update(SecondsD dt) override;
 	void setInput(const Input& input) override { mInput = input; }
-	void setTarget(Entity* target) override;
+
+private:
+	AttachmentPointPtr findAttachmentPoint(const Entity& entity) const; //!< Can return null
 
 private:
 	Params mParams;
-	AttachmentPointPtr mAttachmentPoint;
 	Input mInput = Input::zero();
 
 	static const float msYawRate;
 	static const float msPitchRate;
 	static const float msZoomRate;
 };
+
+SKYBOLT_REFLECT_EXTERN(AttachedCameraController)
 
 } // namespace sim
 } // namespace skybolt

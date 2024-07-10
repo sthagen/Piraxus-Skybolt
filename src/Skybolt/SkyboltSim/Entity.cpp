@@ -8,14 +8,16 @@
 #include "Entity.h"
 #include "Component.h"
 #include "World.h"
-#include "Components/DynamicBodyComponent.h"
+#include "Components/Motion.h"
 #include "Components/Node.h"
 
 namespace skybolt {
 namespace sim {
 
-Entity::Entity()
+Entity::Entity(const EntityId& id) :
+	mId(id)
 {
+	assert(mId != nullEntityId());
 }
 
 Entity::~Entity()
@@ -35,42 +37,6 @@ void Entity::removeComponent(const ComponentPtr& c)
 	mComponents.removeItem(c);
 }
 
-void Entity::updatePreDynamics(TimeReal dt, TimeReal dtWallClock)
-{
-	for (const ComponentPtr& c : mComponents.getAllItems())
-		c->updatePreDynamics(dt, dtWallClock);
-}
-
-void Entity::updatePreDynamicsSubstep(TimeReal dtSubstep)
-{
-	for(const ComponentPtr& c : mComponents.getAllItems())
-		c->updatePreDynamicsSubstep(dtSubstep);
-}
-
-void Entity::updateDynamicsSubstep(TimeReal dtSubstep)
-{
-	for (const ComponentPtr& c : mComponents.getAllItems())
-		c->updateDynamicsSubstep(dtSubstep);
-}
-
-void Entity::updatePostDynamicsSubstep(TimeReal dtSubstep)
-{
-	for (const ComponentPtr& c : mComponents.getAllItems())
-		c->updatePostDynamicsSubstep(dtSubstep);
-}
-
-void Entity::updatePostDynamics(TimeReal dt, TimeReal dtWallClock)
-{
-	for (const ComponentPtr& c : mComponents.getAllItems())
-		c->updatePostDynamics(dt, dtWallClock);
-}
-
-void Entity::updateAttachments(TimeReal dt, TimeReal dtWallClock)
-{
-	for (const ComponentPtr& c : mComponents.getAllItems())
-		c->updateAttachments(dt, dtWallClock);
-}
-
 void Entity::setDynamicsEnabled(bool enabled)
 {
 	if (mDynamicsEnabled != enabled)
@@ -78,7 +44,43 @@ void Entity::setDynamicsEnabled(bool enabled)
 		mDynamicsEnabled = enabled;
 
 		for (const ComponentPtr& c : mComponents.getAllItems())
+		{
 			c->setDynamicsEnabled(enabled);
+		}
+	}
+}
+
+void Entity::setSimTime(SecondsD newTime)
+{
+	for (const ComponentPtr& c : mComponents.getAllItems())
+	{
+		c->setSimTime(newTime);
+	}
+}
+
+void Entity::advanceWallTime(SecondsD newTime, SecondsD dt)
+{
+	for (const ComponentPtr& c : mComponents.getAllItems())
+	{
+		c->advanceWallTime(newTime, dt);
+	}
+}
+
+void Entity::advanceSimTime(SecondsD newTime, SecondsD dt)
+{
+	for (const ComponentPtr& c : mComponents.getAllItems())
+	{
+		c->advanceSimTime(newTime, dt);
+	}
+}
+
+void Entity::update(UpdateStage stage)
+{
+	assert(mDynamicsEnabled || stage != UpdateStage::DynamicsSubStep);
+
+	for (const ComponentPtr& c : mComponents.getAllItems())
+	{
+		c->update(stage);
 	}
 }
 
@@ -109,10 +111,10 @@ std::optional<Quaternion> getOrientation(const Entity& entity)
 
 std::optional<Vector3> getVelocity(const Entity& entity)
 {
-	auto* component = entity.getFirstComponent<DynamicBodyComponent>().get();
+	auto* component = entity.getFirstComponent<Motion>().get();
 	if (component)
 	{
-		return component->getLinearVelocity();
+		return component->linearVelocity;
 	}
 	return std::nullopt;
 }
@@ -150,9 +152,9 @@ void setOrientation(Entity& entity, const Quaternion& orientation)
 
 void setVelocity(Entity& entity, const Vector3& velocity)
 {
-	if (auto* body = entity.getFirstComponent<DynamicBodyComponent>().get())
+	if (auto* component = entity.getFirstComponent<Motion>().get())
 	{
-		body->setLinearVelocity(velocity);
+		component->linearVelocity = velocity;
 	}
 }
 

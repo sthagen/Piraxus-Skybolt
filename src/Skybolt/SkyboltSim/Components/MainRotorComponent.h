@@ -40,6 +40,7 @@ struct MainRotorComponentConfig
 {
 	MainRotorParamsPtr params;
 	Node* node;
+	Motion* motion;
 	DynamicBodyComponent* body;
 	Vector3 positionRelBody;
 	Quaternion orientationRelBody;
@@ -55,8 +56,6 @@ class MainRotorComponent : public Component
 public:
 	MainRotorComponent(const MainRotorComponentConfig& config);
 
-	void updatePreDynamicsSubstep(TimeReal dt);
-
 	void setNormalizedRpm(float rpm) { mDriverRpm = rpm; }
 
 	float getPitchAngle() const {return mPitch;}
@@ -69,6 +68,15 @@ public:
 
 	float getTppPitchOffset() const { return mParams->tppPitchOffset; }
 
+public: // SimUpdatable interface
+	void advanceSimTime(SecondsD newTime, SecondsD dt) override;
+
+	SKYBOLT_BEGIN_REGISTER_UPDATE_HANDLERS
+		SKYBOLT_REGISTER_UPDATE_HANDLER(UpdateStage::PreDynamicsSubStep, updatePreDynamicsSubstep)
+	SKYBOLT_END_REGISTER_UPDATE_HANDLERS
+
+	void updatePreDynamicsSubstep();
+
 private:
 	float calculateInducedVelocity(float velSqLength) const;
 	Vector3 calculateLift(float inducedVel) const;
@@ -77,6 +85,7 @@ private:
 private:
 	MainRotorParamsPtr mParams;
 	Node* mNode;
+	Motion* mMotion;
 	DynamicBodyComponent* mBody;
 	ControlInputVec2Ptr mCyclicInput; //!< range is [-1, 1]. Positive backward and right.
 	ControlInputFloatPtr mCollectiveInput; //!< range [0, 1]
@@ -92,6 +101,7 @@ private:
 	float mTppPitch; //!< Tip-plane-path pitch
 	float mTppRoll; //!< Tip-plane-path roll
 	Quaternion mTppOriRelBody;
+	SecondsD mDt = 0;
 };
 
 } // namespace sim

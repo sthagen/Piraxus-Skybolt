@@ -8,9 +8,6 @@
 #pragma once
 
 #include "CameraController.h"
-#include "LatLonSettable.h"
-#include "Pitchable.h"
-#include "Zoomable.h"
 
 namespace skybolt {
 namespace sim {
@@ -20,6 +17,13 @@ class NullCameraController : public CameraController
 public:
 	NullCameraController(Entity* camera) : CameraController(camera) {}
 };
+
+SKYBOLT_REFLECT_BEGIN(NullCameraController)
+{
+	registry.type<NullCameraController>("NullCameraController")
+		.superType<NullCameraController>();
+}
+SKYBOLT_REFLECT_END
 
 } // namespace sim
 } // namespace skybolt

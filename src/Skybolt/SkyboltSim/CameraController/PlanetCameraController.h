@@ -10,28 +10,28 @@
 #include "CameraController.h"
 #include "LatLonSettable.h"
 #include "Pitchable.h"
+#include "Targetable.h"
 #include "Zoomable.h"
 
 namespace skybolt {
 namespace sim {
 
-class PlanetCameraController : public CameraController, public Pitchable, public LatLonSettable, public Zoomable
+class PlanetCameraController : public CameraController, public LatLonSettable, public Pitchable, public Targetable, public Zoomable
 {
 public:
 	struct Params
 	{
-		Real maxDistOnRadius; //!< Maximum alowed camera distance from the planet, divided by planet radius
+		double maxDistOnRadius; //!< Maximum alowed camera distance from the planet, divided by planet radius
 		float fovY;
 		float zoomRate;
 	};
 
-	PlanetCameraController(sim::Entity* camera, const Params& params);
+	PlanetCameraController(Entity* camera, World* world, const Params& params);
 
 public:
 	// CameraController interface
-	void update(float dt) override;
+	void update(SecondsD dt) override;
 	void setInput(const Input& input) override { mInput = input; }
-	void setTarget(Entity* target) override;
 
 private:
 	Params mParams;
@@ -41,6 +41,8 @@ private:
 	static const float msPitchRate;
 	static const float msZoomRate;
 };
+
+SKYBOLT_REFLECT_EXTERN(PlanetCameraController)
 
 } // namespace sim
 } // namespace skybolt

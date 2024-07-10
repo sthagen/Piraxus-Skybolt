@@ -39,7 +39,7 @@ static LatLonAltPoints toLatLonAlt(const LatLonPoints& points, const sim::Planet
 	int i = 0;
 	for (const LatLon& point : points)
 	{
-		result[i] = toLatLonAlt(point, provider.getAltitude(point));
+		result[i] = toLatLonAlt(point, provider.getAltitude(point).altitude);
 		++i;
 	}
 	return result;
@@ -51,7 +51,7 @@ static LatLonAltPoints toLatLonWithMinAlt(const LatLonPoints& points, const sim:
 	double alt = math::posInfinity();
 	for (const LatLon& point : points)
 	{
-		alt = std::min(alt, provider.getAltitude(point));
+		alt = std::min(alt, provider.getAltitude(point).altitude);
 	}
 
 	int i = 0;
@@ -602,7 +602,7 @@ int parseRelation(const void* user_data, const readosm_relation* relation)
 // TODO: handle longitude wrap at dateline
 double approxDistanceInRadians(const sim::LatLon& a, const sim::LatLon& b)
 {
-	return std::max(std::fabsf(a.lat - b.lat), std::fabsf(a.lon - b.lon));
+	return std::max(std::fabs(a.lat - b.lat), std::fabs(a.lon - b.lon));
 }
 
 // TODO: handle longitude wrap at dateline
@@ -637,7 +637,7 @@ std::map<std::string, AirportPtr> createAirports(const ParserData& data, const s
 	{
 		auto airport = std::make_shared<Airport>();
 		airport->areaPolygons = v.areaPolygons;
-		airport->altitude = provider.getAltitude(v.bounds.center());
+		airport->altitude = provider.getAltitude(v.bounds.center()).altitude;
 		airports[&v] = airport;
 	}
 

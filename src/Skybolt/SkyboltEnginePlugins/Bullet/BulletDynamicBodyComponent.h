@@ -21,27 +21,30 @@ namespace sim {
 
 class BulletWorld;
 
+struct BulletDynamicBodyComponentConfig
+{
+	BulletWorld* world;
+	EntityId ownerEntityId;
+	Node* node;
+	Motion* motion;
+	double mass;
+	btVector3 momentOfInertia;
+	btCollisionShapePtr shape;
+	btVector3 velocity;
+	int collisionGroupMask;
+	int collisionFilterMask;
+};
+
 class BulletDynamicBodyComponent : public DynamicBodyComponent
 {
-public:
-	BulletDynamicBodyComponent(BulletWorld* world, Node* node, Real mass, const btVector3 &momentOfInertia, btCollisionShape* shape,
-		const btVector3 &velocity, int collisionGroupMask, int collisionFilterMask);
+public: // DynamicBodyComponent interface
+	BulletDynamicBodyComponent(const BulletDynamicBodyComponentConfig& config);
 	~BulletDynamicBodyComponent() override;
-
-	void updatePreDynamics(TimeReal dt, TimeReal dtWallClock) override;
-	void updatePostDynamics(TimeReal dt, TimeReal dtWallClock) override;
 
 	void setDynamicsEnabled(bool enabled) override;
 
-	void setLinearVelocity(const Vector3& v) override;
-	Vector3 getLinearVelocity() const override;
-
-	//! Angular velocity is in world space
-	void setAngularVelocity(const Vector3& v) override;
-	Vector3 getAngularVelocity() const override;
-
-	void setMass(Real mass) override;
-	Real getMass() const override { return mMass; }
+	void setMass(double mass) override;
+	double getMass() const override { return mMass; }
 
 	void setCenterOfMass(const Vector3& relPosition) override;
 
@@ -58,11 +61,22 @@ public:
 
 	RigidBody* getRigidBody() const { return mBody; }
 
-public:
+public: // Component interface
 	std::vector<std::type_index> getExposedTypes() const override
 	{
 		return {typeid(DynamicBodyComponent), typeid(BulletDynamicBodyComponent)};
 	}
+
+public: // SimUpdatable interface
+	SKYBOLT_BEGIN_REGISTER_UPDATE_HANDLERS
+		SKYBOLT_REGISTER_UPDATE_HANDLER(sim::UpdateStage::BeginStateUpdate, updatePreDynamics)
+		SKYBOLT_REGISTER_UPDATE_HANDLER(sim::UpdateStage::EndStateUpdate, updatePostDynamics)
+	SKYBOLT_END_REGISTER_UPDATE_HANDLERS
+
+	void updatePreDynamics();
+	void updatePostDynamics();
+
+	EntityId getOwnerEntityId() const { return mOwnerEntityId; }
 
 protected:
 	void setPosition(const Vector3& position);
@@ -72,19 +86,21 @@ protected:
 	RigidBody* mBody;
 
 private:
+	const double mMinSpeedForCcdSquared;
 	BulletWorld* mWorld;
+	EntityId mOwnerEntityId;
 	Node* mNode;
+	Motion* mMotion;
 	btVector3 mMomentOfInertia;
 	Vector3 mNodePosition;
 	Quaternion mNodeOrientation;
 	btVector3 mCenterOfMass = btVector3(0,0,0); //!< Position of RigidBody relative to Node component in body axes.
-	Real mMass;
+	double mMass;
 
-
-	float mTimeSinceCollided;
-	float mMinSpeedForCcdSquared;
-	bool mForceIntegrationEnabled;
+	bool mDynamicsEnabled;
 };
+
+SKYBOLT_REFLECT_EXTERN(BulletDynamicBodyComponent);
 
 } // namespace sim
 } // namespace skybolt

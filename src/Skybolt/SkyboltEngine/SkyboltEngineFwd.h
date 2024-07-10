@@ -11,6 +11,7 @@
 
 namespace skybolt {
 
+class CameraInputSystem;
 class ComponentFactory;
 class EngineRoot;
 struct EngineStats;
@@ -35,8 +36,8 @@ class Updatable;
 class VisHud;
 class VisNameLabels;
 class VisObjectsComponent;
-class VisOrbits;
 
+typedef std::shared_ptr<CameraInputSystem> CameraInputSystemPtr;
 typedef std::shared_ptr<ComponentFactory> ComponentFactoryPtr;
 typedef std::shared_ptr<LogicalAxis> LogicalAxisPtr;
 typedef std::shared_ptr<InputDevice> InputDevicePtr;

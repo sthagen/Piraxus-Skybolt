@@ -9,6 +9,8 @@
 #include "SkyboltSim/SkyboltSimFwd.h"
 #include "SkyboltSim/System/SystemRegistry.h"
 #include "System.h"
+
+#include <optional>
 #include <vector>
 
 namespace skybolt {
@@ -20,16 +22,29 @@ public:
 	SimStepper(const SystemRegistryPtr& systems);
 	~SimStepper();
 
-	void step(const System::StepArgs& args);
+	void setTime(SecondsD t);
+	SecondsD getTime() const { return mCurrentTime; }
+
+	void step(SecondsD dt);
+
+	void setDynamicsEnabled(bool enabled) { mDynamicsEnabled = enabled; }
+
+	void setDynamicsStepSize(double stepSize) { mDynamicsStepSize = stepSize; }
+	void setMaxDynamicsSubsteps(const std::optional<int>& substeps) { mMaxDynamicsSubsteps = substeps; }
 
 private:
-	void updateDynamicsStep(const System::StepArgs& args);
+	void updateDynamicsStep(const std::vector<SystemPtr>& systems, SecondsD dt);
+
+	void updateSystem(const std::vector<SystemPtr>& systems, UpdateStage stage);
 
 private:
 	SystemRegistryPtr mSystems;
-	double mStepTimer = 0;
-	static const double msDynamicsStepSize;
-	static const int msMaxDynamicsSubsteps = 10;
+	SecondsD mCurrentTime = 0;
+	SecondsD mStepTimer = 0;
+	bool mDynamicsEnabled = true;
+
+	double mDynamicsStepSize = 1.0 / 60.0;
+	std::optional<int> mMaxDynamicsSubsteps = 10;
 };
 
 } // namespace sim

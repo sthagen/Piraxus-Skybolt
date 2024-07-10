@@ -36,6 +36,7 @@ namespace skybolt {
 namespace vis {
 
 VisRoot::VisRoot(const DisplaySettings& settings) :
+	mDisplaySettings(settings),
 	mViewer(std::make_unique<osgViewer::CompositeViewer>()),
 	mLoadTimingPolicy(LoadTimingPolicy::LoadAcrossMultipleFrames)
 {
@@ -53,6 +54,13 @@ VisRoot::VisRoot(const DisplaySettings& settings) :
 
 bool VisRoot::render()
 {
+	if (mWindows.empty())
+	{
+		// Don't call Viewer::frame() if there are no windows,
+		// because the viewer might not be initialized yet, and there is nothing to render.
+		return true;
+	}
+
 	for (const auto& window : mWindows)
 	{
 		window->setLoadTimingPolicy(mLoadTimingPolicy);
@@ -68,14 +76,9 @@ osgViewer::ViewerBase& VisRoot::getViewer() const
 	return *mViewer;
 }
 
-std::weak_ptr<osgViewer::ViewerBase> VisRoot::getViewerPtr() const
-{
-	return mViewer;
-}
-
 void VisRoot::addWindow(const WindowPtr& window)
 {
-	assert(!VectorUtility::findFirst(mWindows, window));
+	assert(!findFirst(mWindows, window));
 	mViewer->addView(window->getView());
 	mWindows.push_back(window);
 
@@ -97,7 +100,7 @@ void VisRoot::addWindow(const WindowPtr& window)
 
 void VisRoot::removeWindow(const WindowPtr& window)
 {
-	VectorUtility::eraseFirst(mWindows, window);
+	eraseFirst(mWindows, window);
 	mViewer->removeView(window->getView());
 }
 

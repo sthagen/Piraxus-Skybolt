@@ -6,9 +6,19 @@
 
 
 #include "Node.h"
+#include "PropertyMetadata.h"
 #include "SkyboltSim/Entity.h"
 
-using namespace skybolt::sim;
+namespace skybolt::sim {
+
+SKYBOLT_REFLECT_BEGIN(Node)
+{
+	registry.type<Node>("Node")
+		.superType<Component>()
+		.property("position", &Node::getPosition, &Node::setPosition, {{PropertyMetadataNames::attributeType, AttributeType::PositionInWorld}})
+		.property("orientation", &Node::getOrientation, &Node::setOrientation, {{PropertyMetadataNames::attributeType, AttributeType::Orientation}});
+}
+SKYBOLT_REFLECT_END
 
 Node::Node(const Vector3 &localPosition, const Quaternion &localOrientation) :
 	mPosition(localPosition),
@@ -29,3 +39,5 @@ void Node::setOrientation(const Quaternion &orientation)
 {
 	mOrientation = orientation;
 }
+
+} // namespace skybolt::sim

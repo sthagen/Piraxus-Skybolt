@@ -10,10 +10,13 @@
 #include <SkyboltSim/System/EntitySystem.h>
 #include <SkyboltSim/World.h>
 #include <SkyboltVis/OsgStateSetHelpers.h>
+#include <SkyboltVis/Scene.h>
 #include <SkyboltVis/TextureCache.h>
 #include <SkyboltVis/Renderable/Model/ModelFactory.h>
 #include <SkyboltVis/Renderable/Planet/Tile/TileSource/JsonTileSourceFactory.h>
 #include <SkyboltCommon/File/FileUtility.h>
+#include <SkyboltCommon/File/OsDirectories.h>
+#include <SkyboltCommon/Json/JsonHelpers.h>
 #include <SkyboltCommon/Math/MathUtility.h>
 
 #define PX_SCHED_IMPLEMENTATION 1
@@ -102,12 +105,33 @@ static int determineThreadCountFromHardwareAndUserLimits()
 	return threadCount;
 }
 
+const std::string skyboltCacheDirEnvironmentVariable = "SKYBOLT_CACHE_DIR";
+
+static file::Path getDefaultCacheDir()
+{
+	return file::getAppUserDataDirectory("Skybolt") / "Cache";
+}
+
+static file::Path getCacheDir()
+{
+	if (const char* dir = std::getenv(skyboltCacheDirEnvironmentVariable.c_str()); dir)
+	{
+		file::Path path(dir);
+		if (std::filesystem::exists(path))
+		{
+			return dir;
+		}
+		BOOST_LOG_TRIVIAL(error) << "Environment variable '" << skyboltCacheDirEnvironmentVariable << "' not set to a valid path. Using default location: " << getDefaultCacheDir().string();
+	}
+	return getDefaultCacheDir();
+}
+
 EngineRoot::EngineRoot(const EngineRootConfig& config) :
 	mPluginFactories(config.pluginFactories),
 	scheduler(new px_sched::Scheduler),
 	fileLocator(locateFile),
-	simWorld(std::make_unique<sim::World>()),
-	namedObjectRegistry(std::make_shared<sim::NamedObjectRegistry>()),
+	scenario(std::make_unique<Scenario>()),
+	typeRegistry(std::make_unique<refl::TypeRegistry>()),
 	engineSettings(config.engineSettings)
 {
 	int threadCount = determineThreadCountFromHardwareAndUserLimits();
@@ -154,12 +178,14 @@ EngineRoot::EngineRoot(const EngineRootConfig& config) :
 			"Please refer to Skybolt documentation for information about finding assets.");
 	}
 
-	programs = vis::createShaderPrograms();
+	if (config.enableVis)
+	{
+		programs = vis::createShaderPrograms();
+	}
 	scene.reset(new vis::Scene(new osg::StateSet()));
 
-	Scenario* scenarioPtr = &scenario;
-	julianDateProvider = [=]() {
-		return scenarioPtr->startJulianDate + scenarioPtr->timeSource.getTime() / (60.0 * 60.0 * 24.0);
+	auto julianDateProvider = [scenario = scenario.get()]() {
+		return getCurrentJulianDate(*scenario);
 	};
 
 	auto componentFactoryRegistry = std::make_shared<ComponentFactoryRegistry>();
@@ -168,34 +194,48 @@ EngineRoot::EngineRoot(const EngineRootConfig& config) :
 	auto visFactoryRegistry = std::make_shared<vis::VisFactoryRegistry>();
 	vis::addDefaultFactories(*visFactoryRegistry);
 
-	tileSourceFactoryRegistry = std::make_shared<vis::JsonTileSourceFactoryRegistry>(config.tileSourceFactoryRegistryConfig);
+	tileSourceFactoryRegistry = std::make_shared<vis::JsonTileSourceFactoryRegistry>([&] {
+		file::Path cacheDir = getCacheDir();
+		BOOST_LOG_TRIVIAL(info) << "Using cache directory '" << cacheDir.string() << "'.";
+		vis::JsonTileSourceFactoryRegistryConfig c;
+		c.apiKeys = readNameMap<std::string>(config.engineSettings, "tileApiKeys");
+		c.cacheDirectory = cacheDir.string();
+		return c;
+	}());
 	vis::addDefaultFactories(*tileSourceFactoryRegistry);
 
 	// Create object factory
 	EntityFactory::Context context;
 	context.scheduler = scheduler.get();
-	context.simWorld = simWorld.get();
+	context.simWorld = &scenario->world;
 	context.componentFactoryRegistry = componentFactoryRegistry;
-	context.scene = scene.get();
-	context.programs = &programs;
 	context.julianDateProvider = julianDateProvider;
-	context.namedObjectRegistry = namedObjectRegistry;
 	context.stats = &stats;
-	context.visFactoryRegistry = visFactoryRegistry;
 	context.tileSourceFactoryRegistry = tileSourceFactoryRegistry;
-	context.modelFactory = createModelFactory(programs);
 	context.fileLocator = locateFile;
 	context.assetPackagePaths = mAssetPackagePaths;
-	context.textureCache = std::make_shared<vis::TextureCache>();
 	context.engineSettings = engineSettings;
+
+	if (config.enableVis)
+	{
+		context.visContext = [&] {
+			EntityFactory::VisContext c;
+			c.scene = scene.get();
+			c.programs = &programs;
+			c.visFactoryRegistry = visFactoryRegistry;
+			c.modelFactory = createModelFactory(programs);
+			c.textureCache = std::make_shared<vis::TextureCache>();
+			return c;
+		}();
+	}
 
 	file::Paths paths = getFilesWithExtensionInDirectoryInAssetPackages(mAssetPackagePaths, "Entities", ".json");
 	entityFactory.reset(new EntityFactory(context, paths));
 
 	// Create default systems
 	systemRegistry = std::make_shared<sim::SystemRegistry>(sim::SystemRegistry({
-		std::make_shared<sim::EntitySystem>(simWorld.get()),
-		std::make_shared<SimVisSystem>(simWorld.get(), scene)
+		std::make_shared<sim::EntitySystem>(&scenario->world),
+		std::make_shared<SimVisSystem>(&scenario->world, scene)
 	}));
 
 	// Create plugins

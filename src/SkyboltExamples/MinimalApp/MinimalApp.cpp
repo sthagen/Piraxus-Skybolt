@@ -24,6 +24,7 @@
 #include <SkyboltEngine/UpdateLoop/UpdateLoopUtility.h>
 
 #include <SkyboltSim/World.h>
+#include <SkyboltSim/CameraController/CameraControllerSelector.h>
 #include <SkyboltSim/Components/CameraComponent.h>
 #include <SkyboltSim/Components/CameraControllerComponent.h>
 #include <SkyboltSim/System/System.h>
@@ -37,13 +38,14 @@
 #include <SkyboltVis/Window/StandaloneWindow.h>
 
 #include <SkyboltCommon/Exception.h>
+#include <SkyboltCommon/MapUtility.h>
 #include <SkyboltCommon/Json/ReadJsonFile.h>
 
 using namespace skybolt;
 using namespace skybolt::sim;
 using namespace skybolt::vis;
 
-static void createEntities(const EntityFactory& entityFactory, World& world, CameraController& cameraController)
+static void createEntities(const EntityFactory& entityFactory, World& world, CameraControllerSelector& cameraControllerSelector)
 {
 	world.addEntity(entityFactory.createEntity("Stars"));
 	world.addEntity(entityFactory.createEntity("SunBillboard"));
@@ -52,7 +54,7 @@ static void createEntities(const EntityFactory& entityFactory, World& world, Cam
 	EntityPtr planet = entityFactory.createEntity("PlanetEarth");
 	world.addEntity(planet);
 
-	cameraController.setTarget(planet.get());
+	cameraControllerSelector.setTargetId(planet->getId());
 }
 
 static osg::ref_ptr<HelpDisplayRenderOperation> createHelpDisplay()
@@ -82,7 +84,7 @@ int main(int argc, char *argv[])
 
 		// Create camera
 		EntityPtr simCamera = engineRoot->entityFactory->createEntity("Camera");
-		engineRoot->simWorld->addEntity(simCamera);
+		engineRoot->scenario->world.addEntity(simCamera);
 		
 		auto visRoot = createExampleVisRoot();
 
@@ -94,11 +96,15 @@ int main(int argc, char *argv[])
 
 		// Create input
 		auto inputPlatform = std::make_shared<InputPlatformOsg>(window->getView());
-		std::vector<LogicalAxisPtr> axes = CameraInputSystem::createDefaultAxes(*inputPlatform);
+		CameraInputAxes axes = createDefaultCameraInputAxes(*inputPlatform);
 
 		// Create systems
-		engineRoot->systemRegistry->push_back(std::make_shared<InputSystem>(inputPlatform, window.get(), axes));
-		engineRoot->systemRegistry->push_back(std::make_shared<CameraInputSystem>(simCamera, inputPlatform, axes));
+		engineRoot->systemRegistry->push_back(std::make_shared<InputSystem>(inputPlatform, toValuesVector(axes)));
+
+		auto cameraInputSystem = std::make_shared<CameraInputSystem>(inputPlatform, axes);
+		configure(*cameraInputSystem, window->getWidth(), engineRoot->engineSettings);
+		connectToCamera(*cameraInputSystem, simCamera);
+		engineRoot->systemRegistry->push_back(cameraInputSystem);
 
 		osg::ref_ptr<HelpDisplayRenderOperation> helpDisplay = createHelpDisplay();
 		window->getRenderOperationSequence().addOperation(helpDisplay, (int)RenderOperationOrder::Hud);
@@ -111,7 +117,7 @@ int main(int argc, char *argv[])
 #endif
 
 		// Create entities
-		createEntities(*engineRoot->entityFactory, *engineRoot->simWorld, *simCamera->getFirstComponentRequired<CameraControllerComponent>()->cameraController);
+		createEntities(*engineRoot->entityFactory, engineRoot->scenario->world, *simCamera->getFirstComponentRequired<CameraControllerComponent>());
 
 		// Run loop
 		runMainLoop(*visRoot, *engineRoot, UpdateLoop::neverExit);

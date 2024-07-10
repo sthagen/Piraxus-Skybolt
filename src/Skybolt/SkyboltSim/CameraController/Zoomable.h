@@ -6,19 +6,28 @@
 
 #pragma once
 
+#include <SkyboltReflection/Reflection.h>
+
 namespace skybolt {
 namespace sim {
 
-	class Zoomable
-	{
-	public:
-		virtual ~Zoomable() = default;
-		virtual float getZoom() const { return mZoom; }
-		virtual void setZoom(float zoom) { mZoom = zoom; }
+class Zoomable
+{
+public:
+	virtual ~Zoomable() = default;
+	virtual double getZoom() const { return mZoom; }
+	virtual void setZoom(double zoom) { mZoom = zoom; }
 
-	protected:
-		float mZoom = 0;
-	};
+protected:
+	double mZoom = 0;
+};
+
+SKYBOLT_REFLECT_BEGIN(Zoomable)
+{
+	registry.type<Zoomable>("Zoomable")
+		.property("zoom", &Zoomable::getZoom, &Zoomable::setZoom);
+}
+SKYBOLT_REFLECT_END
 
 } // namespace sim
 } // namespace skybolt

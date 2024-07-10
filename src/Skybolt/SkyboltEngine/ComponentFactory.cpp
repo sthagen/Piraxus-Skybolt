@@ -6,7 +6,12 @@
 
 #include "ComponentFactory.h"
 
+#include <SkyboltCommon/StringVector.h>
+#include <SkyboltCommon/Json/JsonHelpers.h>
+#include <SkyboltEngine/Components/PlanetElevationComponent.h>
+#include <SkyboltEngine/Scenario/ScenarioMetadataComponent.h>
 #include <SkyboltSim/CollisionGroupMasks.h>
+#include <SkyboltSim/JsonHelpers.h>
 #include <SkyboltSim/CameraController/AttachedCameraController.h>
 #include <SkyboltSim/CameraController/FreeCameraController.h>
 #include <SkyboltSim/CameraController/OrbitCameraController.h>
@@ -23,13 +28,16 @@
 #include <SkyboltSim/Components/FuselageComponent.h>
 #include <SkyboltSim/Components/JetTurbineComponent.h>
 #include <SkyboltSim/Components/MainRotorComponent.h>
+#include <SkyboltSim/Components/Motion.h>
 #include <SkyboltSim/Components/Node.h>
+#include <SkyboltSim/Components/OceanComponent.h>
+#include <SkyboltSim/Components/PlanetComponent.h>
 #include <SkyboltSim/Components/PropellerComponent.h>
 #include <SkyboltSim/Components/ReactionControlSystemComponent.h>
 #include <SkyboltSim/Components/RocketMotorComponent.h>
 #include <SkyboltSim/Components/ShipWakeComponent.h>
-#include <SkyboltSim/JsonHelpers.h>
-#include <SkyboltCommon/Json/JsonHelpers.h>
+#include <SkyboltVis/ElevationProvider/TilePlanetAltitudeProvider.h>
+#include <SkyboltVis/Renderable/Planet/Tile/TileSource/JsonTileSourceFactory.h>
 
 namespace skybolt {
 
@@ -63,9 +71,12 @@ static sim::ComponentPtr loadFuselage(Entity* entity, const ComponentFactoryCont
 	params.yawDueToYawRate = readOptionalOrDefault(json, "yawDueToYawRate", -10.0);
 	params.yawDueToRudder = readOptionalOrDefault(json, "yawDueToRudder", 0.0);
 
+	params.maxAutoTrimAngleOfAttack = readOptionalOrDefault(json, "maxAutoTrimAngleOfAttack", 0.5);
+
 	FuselageComponentConfig config;
 	config.params = params;
 	config.node = entity->getFirstComponentRequired<Node>().get();
+	config.motion = entity->getFirstComponentRequired<Motion>().get();
 	config.body = entity->getFirstComponentRequired<DynamicBodyComponent>().get();
 
 	auto inputs = entity->getFirstComponent<ControlInputsComponent>();
@@ -104,6 +115,7 @@ static sim::ComponentPtr loadMainRotor(Entity* entity, const ComponentFactoryCon
 	MainRotorComponentConfig config;
 	config.params = params;
 	config.node = entity->getFirstComponentRequired<Node>().get();
+	config.motion = entity->getFirstComponentRequired<Motion>().get();
 	config.body = entity->getFirstComponentRequired<DynamicBodyComponent>().get();
 	config.positionRelBody = readVector3(json.at("positionRelBody"));
 	config.orientationRelBody = readQuaternion(json.at("orientationRelBody"));
@@ -194,13 +206,19 @@ static sim::ComponentPtr loadNode(Entity* entity, const ComponentFactoryContext&
 	return std::make_shared<Node>();
 }
 
+static sim::ComponentPtr loadMotion(Entity* entity, const ComponentFactoryContext& context, const nlohmann::json& json)
+{
+	return std::make_shared<Motion>();
+}
+
 static sim::ComponentPtr loadDynamicBody(Entity* entity, const ComponentFactoryContext& context, const nlohmann::json& json)
 {
 	Node* node = entity->getFirstComponentRequired<Node>().get();
-	Real mass = json.at("mass");
+	Motion* motion = entity->getFirstComponentRequired<Motion>().get();
+	double mass = json.at("mass");
 	Vector3 momentOfInertia = readOptionalVector3(json, "momentOfInertia");
 
-	auto component = std::make_shared<SimpleDynamicBodyComponent>(node, mass, momentOfInertia);
+	auto component = std::make_shared<SimpleDynamicBodyComponent>(node, motion, mass, momentOfInertia);
 	component->setCenterOfMass(readOptionalVector3(json, "centerOfMass"));
 	return component;
 }
@@ -208,11 +226,10 @@ static sim::ComponentPtr loadDynamicBody(Entity* entity, const ComponentFactoryC
 static sim::ComponentPtr loadAttachment(Entity* entity, const ComponentFactoryContext& context, const nlohmann::json& json)
 {
 	sim::AttachmentParams params;
-	params.entityTemplate = json.at("entityTemplate").get<std::string>();
 	params.positionRelBody = readVector3(json.at("positionRelBody"));
 	params.orientationRelBody = readOptionalQuaternion(json, "orientationRelBody");
 
-	return std::make_shared<AttachmentComponent>(params, entity);
+	return std::make_shared<AttachmentComponent>(params, context.simWorld, entity);
 }
 
 static sim::ComponentPtr loadCamera(Entity* entity, const ComponentFactoryContext& context, const nlohmann::json& json)
@@ -239,7 +256,7 @@ static sim::ComponentPtr loadCameraController(Entity* entity, const ComponentFac
 		params.minFovY = 0.3;
 		params.maxFovY = 1.3;
 		params.attachmentPointName = "cockpit";
-		CameraControllerPtr controller(new AttachedCameraController(entity, params));
+		CameraControllerPtr controller(new AttachedCameraController(entity, context.simWorld, params));
 		controllers["Cockpit"] = controller;
 	}
 
@@ -252,7 +269,7 @@ static sim::ComponentPtr loadCameraController(Entity* entity, const ComponentFac
 
 	{
 		OrbitCameraController::Params params(10, 200, 0.5);
-		CameraControllerPtr controller(new OrbitCameraController(entity, params));
+		CameraControllerPtr controller(new OrbitCameraController(entity, context.simWorld, params));
 		controllers["Follow"] = controller;
 	}
 
@@ -261,7 +278,7 @@ static sim::ComponentPtr loadCameraController(Entity* entity, const ComponentFac
 		params.zoomRate = 0.5;
 		params.maxDistOnRadius = 7.0;
 		params.fovY = 0.5f;
-		CameraControllerPtr controller(new PlanetCameraController(entity, params));
+		CameraControllerPtr controller(new PlanetCameraController(entity, context.simWorld, params));
 		controllers["Globe"] = controller;
 	}
 
@@ -270,9 +287,9 @@ static sim::ComponentPtr loadCameraController(Entity* entity, const ComponentFac
 		controllers["Null"] = controller;
 	}
 
-	auto selector = std::make_shared<CameraControllerSelector>(entity, controllers);
-	selector->selectController("Globe");
-	return std::make_shared<CameraControllerComponent>(selector);
+	auto component = std::make_shared<CameraControllerComponent>(controllers);
+	component->selectController("Globe");
+	return component;
 }
 
 static sim::ComponentPtr loadControlInputs(Entity* entity, const ComponentFactoryContext& context, const nlohmann::json& json)
@@ -299,22 +316,68 @@ static sim::ComponentPtr loadAssetDescription(Entity* entity, const ComponentFac
 	return std::make_shared<AssetDescriptionComponent>(desc);
 }
 
+static sim::ComponentPtr loadScenarioMetadata(Entity* entity, const ComponentFactoryContext& context, const nlohmann::json& json)
+{
+	auto component = std::make_shared<ScenarioMetadataComponent>();
+	component->directory = parseStringList(json.at("scenarioObjectDirectory").get<std::string>(), "/");
+	return component;
+}
+
+static sim::ComponentPtr loadPlanet(Entity* entity, const ComponentFactoryContext& context, const nlohmann::json& json)
+{
+	double planetRadius = json.at("radius").get<double>();
+	bool hasOcean = readOptionalOrDefault(json, "ocean", true);
+	auto planetComponent = std::make_shared<PlanetComponent>(planetRadius);
+
+	if (json.contains("atmosphere"))
+	{
+		planetComponent->atmosphere = createEarthAtmosphere(); // TODO: use planet specific atmospheric parameters
+	}
+
+	// FIXME: This should be split out into a separate component loader, instead of added here as a side effect
+	if (hasOcean)
+	{
+		entity->addComponent(std::make_shared<OceanComponent>());
+	}
+
+	return planetComponent;
+}
+
+static sim::ComponentPtr loadPlanetElevationTileSource(Entity* entity, const ComponentFactoryContext& context, const nlohmann::json& json)
+{
+	auto elevationComponent = std::make_shared<PlanetElevationComponent>();
+
+	nlohmann::json elevation = json.at("tileSource");
+	elevationComponent->tileSource = context.tileSourceFactoryRegistry->getFactory(elevation.at("format"))(elevation);
+	elevationComponent->elevationMaxLodLevel = elevation.at("maxLevel");
+	elevationComponent->heightMapTexelsOnTileEdge = readOptionalOrDefault(elevation, "heightMapTexelsOnTileEdge", false);
+
+	auto planetComponent = entity->getFirstComponentRequired<PlanetComponent>();
+	planetComponent->altitudeProvider = std::make_shared<vis::NonBlockingTilePlanetAltitudeProvider>(context.scheduler, elevationComponent->tileSource, elevationComponent->elevationMaxLodLevel);
+
+	return elevationComponent;
+}
+
 void addDefaultFactories(ComponentFactoryRegistry& registry)
 {
-	registry["camera"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadCamera);
-	registry["cameraController"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadCameraController);
-	registry["controlInputs"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadControlInputs);
-	registry["node"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadNode);
-	registry["dynamicBody"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadDynamicBody);
-	registry["fuselage"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadFuselage);
-	registry["reactionControlSystem"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadReactonControlSystem);
-	registry["rocketMotor"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadRocketMotor);
-	registry["mainRotor"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadMainRotor);
-	registry["tailRotor"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadTailRotor);
 	registry["shipWake"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadShipWake);
 	registry["attachment"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadAttachment);
 	registry["attachmentPoint"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadAttachmentPoint);
 	registry["assetDescription"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadAssetDescription);
+	registry["camera"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadCamera);
+	registry["cameraController"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadCameraController);
+	registry["controlInputs"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadControlInputs);
+	registry["dynamicBody"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadDynamicBody);
+	registry["fuselage"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadFuselage);
+	registry["mainRotor"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadMainRotor);
+	registry["motion"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadMotion);
+	registry["node"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadNode);
+	registry["planet"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadPlanet);
+	registry["planetElevationTileSource"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadPlanetElevationTileSource);
+	registry["reactionControlSystem"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadReactonControlSystem);
+	registry["rocketMotor"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadRocketMotor);
+	registry["scenarioMetadata"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadScenarioMetadata);
+	registry["tailRotor"] = std::make_shared<ComponentFactoryFunctionAdapter>(loadTailRotor);
 }
 
 } // namespace skybolt

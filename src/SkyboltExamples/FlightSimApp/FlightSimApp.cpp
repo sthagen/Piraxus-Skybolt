@@ -75,7 +75,7 @@ static std::vector<LogicalAxisPtr> createHelicopterInputAxesKeyboard(const Input
 class CameraViewSelector : public EventListener
 {
 public:
-	CameraViewSelector(const CameraControllerSelectorPtr& cameraController, const std::shared_ptr<HudSystem>& hudSystem, const std::function<void(bool)>& hudVisibilitySwitch) :
+	CameraViewSelector(const CameraControllerComponentPtr& cameraController, const std::shared_ptr<HudSystem>& hudSystem, const std::function<void(bool)>& hudVisibilitySwitch) :
 		mCameraController(cameraController),
 		mHudSystem(hudSystem),
 		mHudVisibilitySwitch(hudVisibilitySwitch)
@@ -113,7 +113,7 @@ public:
 	}
 
 private:
-	CameraControllerSelectorPtr mCameraController;
+	CameraControllerComponentPtr mCameraController;
 	std::shared_ptr<HudSystem> mHudSystem;
 	std::function<void(bool)> mHudVisibilitySwitch;
 };
@@ -157,12 +157,11 @@ int main(int argc, char *argv[])
 
 		// Create camera
 		EntityPtr simCamera = engineRoot->entityFactory->createEntity("Camera");
-		engineRoot->simWorld->addEntity(simCamera);
+		engineRoot->scenario->world.addEntity(simCamera);
 
 		// Configure external view camera controller
 		auto cameraControllerComponent = simCamera->getFirstComponentRequired<CameraControllerComponent>();
-		auto cameraController = std::static_pointer_cast<CameraControllerSelector>(cameraControllerComponent->cameraController);
-		auto orbitController = cameraController->getControllerOfType<OrbitCameraController>();
+		auto orbitController = cameraControllerComponent->getControllerOfType<OrbitCameraController>();
 		orbitController->setLagTimeConstant(0.3);
 		orbitController->setTargetOffset(sim::Vector3(0, 0, -3));
 		orbitController->setZoom(0.8);
@@ -176,15 +175,14 @@ int main(int argc, char *argv[])
 		viewport->setCamera(getVisCamera(*simCamera));
 		visRoot->addWindow(window);
 
-		CameraControllerSelectorPtr cameraController2;
+		CameraControllerComponentPtr cameraControllerComponent2;
 		if (params.count("multiwindow"))
 		{
 			sim::EntityPtr simCamera2 = engineRoot->entityFactory->createEntity("Camera");
-			engineRoot->simWorld->addEntity(simCamera2);
+			engineRoot->scenario->world.addEntity(simCamera2);
 			
-			auto cameraControllerComponent2 = simCamera2->getFirstComponentRequired<CameraControllerComponent>();
-			cameraController2 = std::static_pointer_cast<CameraControllerSelector>(cameraControllerComponent2->cameraController);
-			cameraController2->selectController("Follow");
+			cameraControllerComponent2 = simCamera2->getFirstComponentRequired<CameraControllerComponent>();
+			cameraControllerComponent2->selectController("Follow");
 
 			vis::WindowPtr window2 = std::make_unique<vis::StandaloneWindow>(vis::RectI(1080, 0, 1080, 720));
 			osg::ref_ptr<vis::RenderCameraViewport> viewport2 = createAndAddViewportToWindowWithEngine(*window2, *engineRoot);
@@ -197,9 +195,12 @@ int main(int argc, char *argv[])
 		std::vector<LogicalAxisPtr> axes = createHelicopterInputAxesKeyboard(*inputPlatform);
 
 		// Create systems
-		engineRoot->systemRegistry->push_back(std::make_shared<InputSystem>(inputPlatform, window.get(), axes));
-		engineRoot->systemRegistry->push_back(std::make_shared<CameraInputSystem>(simCamera, inputPlatform, std::vector<LogicalAxisPtr>()));
-		
+		engineRoot->systemRegistry->push_back(std::make_shared<InputSystem>(inputPlatform, axes));
+
+		auto cameraInputSystem = std::make_shared<CameraInputSystem>(inputPlatform);
+		configure(*cameraInputSystem, window->getWidth(), engineRoot->engineSettings);
+		connectToCamera(*cameraInputSystem, simCamera);
+		engineRoot->systemRegistry->push_back(cameraInputSystem);
 
 		osg::ref_ptr<osg::Camera> overlayCamera = viewport->getFinalRenderTarget()->getOsgCamera();
 
@@ -217,7 +218,7 @@ int main(int argc, char *argv[])
 			hudSystem->setEnabled(visible);
 		};
 
-		auto cameraViewSelector = std::make_shared<CameraViewSelector>(cameraController, hudSystem, hudVisibilitySwitch);
+		auto cameraViewSelector = std::make_shared<CameraViewSelector>(cameraControllerComponent, hudSystem, hudVisibilitySwitch);
 		inputPlatform->getEventEmitter()->addEventListener<KeyEvent>(cameraViewSelector.get());
 
 		auto helpDisplayToggleEventListener = std::make_shared<HelpDisplayToggleEventListener>(helpDisplay);
@@ -229,10 +230,10 @@ int main(int argc, char *argv[])
 #endif
 
 		// Create entities
-		createEnvironmentEntities(*engineRoot->entityFactory, *engineRoot->simWorld);
+		createEnvironmentEntities(*engineRoot->entityFactory, engineRoot->scenario->world);
 		
 		EntityPtr aircraft = engineRoot->entityFactory->createEntity("UH60");
-		engineRoot->simWorld->addEntity(aircraft);
+		engineRoot->scenario->world.addEntity(aircraft);
 
 		sim::LatLonAlt boeingFieldPosition(47.537 * math::degToRadD(), -122.307 * math::degToRadD(), 500);
 		setPosition(*aircraft, toGeocentric(sim::LatLonAltPosition(boeingFieldPosition)).position);
@@ -241,15 +242,15 @@ int main(int argc, char *argv[])
 		// Configure systems for player's aircraft
 		entityInputSystem->setEntity(aircraft);
 		hudSystem->setEntity(aircraft.get());
-		cameraController->setTarget(aircraft.get());
+		cameraControllerComponent->setTargetId(aircraft->getId());
 
-		if (cameraController2)
+		if (cameraControllerComponent2)
 		{
-			cameraController2->setTarget(aircraft.get());
+			cameraControllerComponent2->setTargetId(aircraft->getId());
 		}
 
 		// Set time of day
-		engineRoot->scenario.startJulianDate = sim::calcJulianDate(/* year */ 2030, /* month */ 4, /* day */ 6, /* hour */ 20);
+		engineRoot->scenario->startJulianDate = sim::calcJulianDate(/* year */ 2030, /* month */ 4, /* day */ 6, /* hour */ 20);
 
 		// Run loop
 		runMainLoop(*visRoot, *engineRoot, UpdateLoop::neverExit);

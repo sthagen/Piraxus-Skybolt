@@ -12,7 +12,7 @@
 namespace skybolt {
 namespace sim {
 
-class FreeCameraController : public sim::CameraController, public Pitchable, public Yawable, public Zoomable
+class FreeCameraController : public CameraController, public Pitchable, public Yawable, public Zoomable
 {
 public:
 	struct Params
@@ -20,15 +20,17 @@ public:
 		float fovY;
 	};
 
-	FreeCameraController(sim::Entity* camera, const Params& params);
+	FreeCameraController(Entity* camera, const Params& params);
 
-	void update(float dt) override;
+	void update(SecondsD dt) override;
 	void setInput(const Input& input) override { mInput = input; }
 
 private:
 	float mBaseFov;
 	Input mInput = Input::zero();
 };
+
+SKYBOLT_REFLECT_EXTERN(FreeCameraController);
 
 } // namespace sim
 } // namespace skybolt

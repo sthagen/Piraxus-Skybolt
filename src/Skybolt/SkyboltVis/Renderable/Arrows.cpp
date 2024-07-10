@@ -19,12 +19,12 @@ Arrows::Arrows(const Params& params) :
 {
 	mGeode = new osg::Geode();
 	mGeode->getOrCreateStateSet()->setAttribute(params.program);
-	mSwitch->addChild(mGeode);
+	mTransform->addChild(mGeode);
 }
 
 Arrows::~Arrows()
 {
-	mSwitch->removeChild(mGeode);
+	mTransform->removeChild(mGeode);
 }
 
 const float arrowHeadNormalScale = 0.1f;
@@ -79,11 +79,10 @@ void Arrows::setSegments(const std::vector<Vec3Segment>& segments)
 		// Add points to geometry
 		osg::ref_ptr<osg::Vec4Array> color = new osg::Vec4Array;
 		color->push_back(osg::Vec4(1.0, 0.0, 0.0, 1.0));
-		mGeometry->setColorArray(color.get());
+		mGeometry->setColorArray(color);
 		mGeometry->setColorBinding(osg::Geometry::BIND_OVERALL);
 
 		mGeometry->setVertexArray(points);
-		mGeometry->getPrimitiveSetList().clear();
 		mGeometry->addPrimitiveSet(new osg::DrawArrays(GL_LINES, 0, points->size()));
 	}
 }

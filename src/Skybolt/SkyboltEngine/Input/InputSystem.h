@@ -18,14 +18,19 @@ namespace skybolt {
 class InputSystem : public sim::System
 {
 public:
-	InputSystem(const InputPlatformPtr& inputPlatform, vis::Window* window, const std::vector<LogicalAxisPtr>& axes);
+	InputSystem(const InputPlatformPtr& inputPlatform, const std::vector<LogicalAxisPtr>& axes = {});
 
-	void updatePostDynamics(const System::StepArgs& args);
+	SKYBOLT_BEGIN_REGISTER_UPDATE_HANDLERS
+		SKYBOLT_REGISTER_UPDATE_HANDLER(sim::UpdateStage::Input, updateState)
+	SKYBOLT_END_REGISTER_UPDATE_HANDLERS
+
+	void advanceWallTime(sim::SecondsD newTime, sim::SecondsD dt) override;
+	void updateState();
 
 private:
 	InputPlatformPtr mInputPlatform;
-	vis::Window* mWindow;
 	std::vector<LogicalAxisPtr> mAxes;
+	sim::SecondsD mDtWallClock = 0;
 };
 
 } // namespace skybolt

@@ -8,8 +8,10 @@
 #include "EngineRoot.h"
 #include "EngineSettings.h"
 #include "EngineStats.h"
-#include "TemplateNameComponent.h"
-#include "VisObjectsComponent.h"
+#include "Components/PlanetElevationComponent.h"
+#include "Components/TemplateNameComponent.h"
+#include "Components/VisObjectsComponent.h"
+#include "Scenario/ScenarioMetadataComponent.h"
 #include "SimVisBinding/SimVisBinding.h"
 #include "SimVisBinding/GeocentricToNedConverter.h"
 #include "SimVisBinding/CameraSimVisBinding.h"
@@ -25,9 +27,11 @@
 #include <SkyboltSim/WorldUtil.h>
 #include <SkyboltSim/Components/DynamicBodyComponent.h>
 #include <SkyboltSim/Components/CameraComponent.h>
+#include <SkyboltSim/Components/CloudComponent.h>
 #include <SkyboltSim/Components/MainRotorComponent.h>
 #include <SkyboltSim/Components/NameComponent.h>
 #include <SkyboltSim/Components/Node.h>
+#include <SkyboltSim/Components/OceanComponent.h>
 #include <SkyboltSim/Components/ParticleSystemComponent.h>
 #include <SkyboltSim/Components/PlanetComponent.h>
 #include <SkyboltSim/Components/PropellerComponent.h>
@@ -43,7 +47,6 @@
 #include <SkyboltVis/RenderBinHelpers.h>
 #include <SkyboltVis/TextureCache.h>
 #include <SkyboltVis/Scene.h>
-#include <SkyboltVis/ElevationProvider/TilePlanetAltitudeProvider.h>
 #include <SkyboltVis/Renderable/Particles.h>
 #include <SkyboltVis/Renderable/Atmosphere/Bruneton/BruentonAtmosphere.h>
 #include <SkyboltVis/Renderable/CameraRelativeBillboard.h>
@@ -238,9 +241,9 @@ static vis::ModelPtr createVisualModel(const nlohmann::json& json, vis::ModelFac
 	return std::make_shared<vis::Model>(config);
 }
 
-static void loadVisualModel(Entity* entity, const EntityFactory::Context& context, const VisObjectsComponentPtr& visObjectsComponent, const SimVisBindingsComponentPtr& simVisBindingComponent, const nlohmann::json& json)
+static void loadVisualModel(Entity* entity, const EntityFactory::Context& context, const EntityFactory::VisContext& visContext, const VisObjectsComponentPtr& visObjectsComponent, const SimVisBindingsComponentPtr& simVisBindingComponent, const nlohmann::json& json)
 {
-	vis::ModelPtr model = createVisualModel(json, *context.modelFactory);
+	vis::ModelPtr model = createVisualModel(json, *visContext.modelFactory);
 	visObjectsComponent->addObject(model);
 
 	SimVisBindingPtr simVis(new SimpleSimVisBinding(entity, model,
@@ -250,9 +253,9 @@ static void loadVisualModel(Entity* entity, const EntityFactory::Context& contex
 	simVisBindingComponent->bindings.push_back(simVis);
 }
 
-static void loadVisualMainRotor(Entity* entity, const EntityFactory::Context& context, const VisObjectsComponentPtr& visObjectsComponent, const SimVisBindingsComponentPtr& simVisBindingComponent, const nlohmann::json& json)
+static void loadVisualMainRotor(Entity* entity, const EntityFactory::Context& context, const EntityFactory::VisContext& visContext, const VisObjectsComponentPtr& visObjectsComponent, const SimVisBindingsComponentPtr& simVisBindingComponent, const nlohmann::json& json)
 {
-	vis::ModelPtr model = createVisualModel(json, *context.modelFactory);
+	vis::ModelPtr model = createVisualModel(json, *visContext.modelFactory);
 	visObjectsComponent->addObject(model);
 
 	auto rotor = entity->getFirstComponentRequired<MainRotorComponent>();
@@ -262,9 +265,9 @@ static void loadVisualMainRotor(Entity* entity, const EntityFactory::Context& co
 	simVisBindingComponent->bindings.push_back(simVis);
 }
 
-static void loadVisualTailRotor(Entity* entity, const EntityFactory::Context& context, const VisObjectsComponentPtr& visObjectsComponent, const SimVisBindingsComponentPtr& simVisBindingComponent, const nlohmann::json& json)
+static void loadVisualTailRotor(Entity* entity, const EntityFactory::Context& context, const EntityFactory::VisContext& visContext, const VisObjectsComponentPtr& visObjectsComponent, const SimVisBindingsComponentPtr& simVisBindingComponent, const nlohmann::json& json)
 {
-	vis::ModelPtr model = createVisualModel(json, *context.modelFactory);
+	vis::ModelPtr model = createVisualModel(json, *visContext.modelFactory);
 	visObjectsComponent->addObject(model);
 
 	auto rotor = entity->getFirstComponentRequired<PropellerComponent>();
@@ -274,17 +277,17 @@ static void loadVisualTailRotor(Entity* entity, const EntityFactory::Context& co
 	simVisBindingComponent->bindings.push_back(simVis);
 }
 
-static void loadVisualCamera(Entity* entity, const EntityFactory::Context& context, const VisObjectsComponentPtr& visObjectsComponent, const SimVisBindingsComponentPtr& simVisBindingComponent, const nlohmann::json& json)
+static void loadVisualCamera(Entity* entity, const EntityFactory::Context& context, const EntityFactory::VisContext& visContext, const VisObjectsComponentPtr& visObjectsComponent, const SimVisBindingsComponentPtr& simVisBindingComponent, const nlohmann::json& json)
 {
 	vis::CameraPtr visCamera(new vis::Camera(1.0f));
 	SimVisBindingPtr cameraSimVisBinding(new CameraSimVisBinding(entity, visCamera));
 	simVisBindingComponent->bindings.push_back(cameraSimVisBinding);
 }
 
-static void loadParticleSystem(Entity* entity, const EntityFactory::Context& context, const VisObjectsComponentPtr& visObjectsComponent, const SimVisBindingsComponentPtr& simVisBindingComponent, const nlohmann::json& json)
+static void loadParticleSystem(Entity* entity, const EntityFactory::Context& context, const EntityFactory::VisContext& visContext, const VisObjectsComponentPtr& visObjectsComponent, const SimVisBindingsComponentPtr& simVisBindingComponent, const nlohmann::json& json)
 {
 	NearestPlanetProvider nearestPlanetProvider = [world = context.simWorld] (const Vector3& position) {
-		return findNearestEntityWithComponent<sim::PlanetComponent>(world->getEntities(), position);
+		return findNearestEntityWithComponent<sim::PlanetComponent>(world->getEntities(), position).get();
 	};
 
 	ParticleEmitter::Params emitterParams;
@@ -316,11 +319,11 @@ static void loadParticleSystem(Entity* entity, const EntityFactory::Context& con
 	}));
 	entity->addComponent(std::make_shared<ParticleSystemComponent>(particleSystem));
 
-	osg::ref_ptr<osg::Texture2D> texture = context.textureCache->getOrCreateTexture(json.at("albedoTexture"), [](const std::string& filename) {
+	osg::ref_ptr<osg::Texture2D> texture = visContext.textureCache->getOrCreateTexture(json.at("albedoTexture"), [](const std::string& filename) {
 		return vis::createTilingSrgbTexture(osgDB::readImageFile(filename));
 	});
 
-	auto program = context.programs->getRequiredProgram("particles");
+	auto program = visContext.programs->getRequiredProgram("particles");
 	auto visParticles = std::make_shared<vis::Particles>(program, texture);
 	visObjectsComponent->addObject(visParticles);
 
@@ -416,18 +419,18 @@ static osg::ref_ptr<osg::Texture2D> readTilingNonSrgbTexture(const std::string& 
 	return texture;
 }
 
-static void loadPlanet(Entity* entity, const EntityFactory::Context& context, const VisObjectsComponentPtr& visObjectsComponent, const SimVisBindingsComponentPtr& simVisBindingComponent, const nlohmann::json& json)
+static void loadVisualPlanet(Entity* entity, const EntityFactory::Context& context, const EntityFactory::VisContext& visContext, const VisObjectsComponentPtr& visObjectsComponent, const SimVisBindingsComponentPtr& simVisBindingComponent, const nlohmann::json& json)
 {
-	double planetRadius = json.at("radius").get<double>();
-	bool hasOcean = readOptionalOrDefault(json, "ocean", true);
+	auto planetComponent = entity->getFirstComponentRequired<PlanetComponent>();
+	auto oceanComponent = entity->getFirstComponent<OceanComponent>();
 
 	vis::PlanetConfig config;
 	config.scheduler = context.scheduler;
-	config.programs = context.programs;
-	config.scene = context.scene;
-	config.innerRadius = planetRadius;
-	config.visFactoryRegistry = context.visFactoryRegistry.get();
-	config.waterEnabled = hasOcean;
+	config.programs = visContext.programs;
+	config.scene = visContext.scene;
+	config.innerRadius = planetComponent->radius;
+	config.visFactoryRegistry = visContext.visFactoryRegistry.get();
+	config.waterEnabled = (oceanComponent != nullptr);
 	config.fileLocator = context.fileLocator;
 	
 	{
@@ -435,8 +438,10 @@ static void loadPlanet(Entity* entity, const EntityFactory::Context& context, co
 		if (it != json.end())
 		{
 			const nlohmann::json& clouds = it.value();
-			config.cloudsTexture = context.textureCache->getOrCreateTexture(clouds.at("map"), &createCloudTexture);
+			config.cloudsTexture = visContext.textureCache->getOrCreateTexture(clouds.at("map"), &createCloudTexture);
 			config.cloudRenderingParams = getCloudRenderingParams(context.engineSettings);
+
+			entity->addComponent(std::make_shared<CloudComponent>());
 		}
 	}
 
@@ -447,8 +452,8 @@ static void loadPlanet(Entity* entity, const EntityFactory::Context& context, co
 			const nlohmann::json& atmosphere = it.value();
 			
 			vis::BruentonAtmosphereConfig atmosphereConfig;
-			atmosphereConfig.bottomRadius = readOptionalOrDefault(atmosphere, "bottomRadius", planetRadius);
-			atmosphereConfig.topRadius = readOptionalOrDefault(atmosphere, "topRadius", planetRadius * 1.0094); // TODO: determine programatically from scale height
+			atmosphereConfig.bottomRadius = readOptionalOrDefault(atmosphere, "bottomRadius", planetComponent->radius);
+			atmosphereConfig.topRadius = readOptionalOrDefault(atmosphere, "topRadius", planetComponent->radius * 1.0094); // TODO: determine programatically from scale height
 
 			if (auto coefficient = readOptional<double>(atmosphere, "earthReyleighScatteringCoefficient"))
 			{
@@ -482,19 +487,16 @@ static void loadPlanet(Entity* entity, const EntityFactory::Context& context, co
 		}
 	}
 	
-	int elevationMaxLodLevel;
+	auto elevationComponent = entity->getFirstComponentRequired<PlanetElevationComponent>();
+	config.heightMapTexelsOnTileEdge = elevationComponent->heightMapTexelsOnTileEdge;
+
 	auto it = json.find("surface");
 	if (it != json.end())
 	{
 		const nlohmann::json& layers = it.value();
 		vis::PlanetTileSources planetTileSources;
-		{
-			nlohmann::json elevation = layers.at("elevation");
-			planetTileSources.elevation = context
-				.tileSourceFactoryRegistry->getFactory(elevation.at("format"))(elevation);
-			elevationMaxLodLevel = elevation.at("maxLevel");
-			config.heightMapTexelsOnTileEdge = readOptionalOrDefault(elevation, "heightMapTexelsOnTileEdge", false);
-		}
+		planetTileSources.elevation = elevationComponent->tileSource;
+
 		auto it = layers.find("landMask");
 		if (it != layers.end())
 		{
@@ -571,11 +573,9 @@ static void loadPlanet(Entity* entity, const EntityFactory::Context& context, co
 	}
 
 	vis::PlanetPtr visObject(new vis::Planet(config));
-	entity->addComponent(std::make_shared<Node>());
+	visObjectsComponent->addObject(visObject);
 
-	entity->addComponent(simVisBindingComponent);
-
-	SimVisBindingPtr simVis(new PlanetVisBinding(context.julianDateProvider, entity, visObject));
+	SimVisBindingPtr simVis(std::make_shared<PlanetVisBinding>(context.julianDateProvider, entity, visObject));
 	simVisBindingComponent->bindings.push_back(simVis);
 
 	if (visObject->getWaterMaterial())
@@ -584,40 +584,45 @@ static void loadPlanet(Entity* entity, const EntityFactory::Context& context, co
 		simVisBindingComponent->bindings.push_back(binding);
 	}
 
-	entity->addComponent(visObjectsComponent);
-	visObjectsComponent->addObject(visObject);
-
-	auto altitudeProvider = config.planetTileSources ? std::make_shared<vis::TileAsyncPlanetAltitudeProvider>(context.scheduler, config.planetTileSources->elevation, elevationMaxLodLevel) : nullptr;
-	auto planetComponent = std::make_shared<PlanetComponent>(planetRadius, hasOcean, altitudeProvider);
-	planetComponent->atmosphere = config.atmosphereConfig ? std::optional<Atmosphere>(createEarthAtmosphere()) : std::nullopt; // TODO: use planet specific atmospheric parameters
-	entity->addComponent(planetComponent);
-
-	entity->addComponent(ComponentPtr(new NameComponent("Earth", context.namedObjectRegistry, entity)));
-
 	std::shared_ptr<PlanetStatsUpdater> statsUpdater = std::make_shared<PlanetStatsUpdater>(context.stats, static_cast<vis::Planet*>(visObject.get()));
 	entity->addComponent(statsUpdater);
 }
 
-typedef std::function<void(Entity*, const EntityFactory::Context&, VisObjectsComponentPtr&, const SimVisBindingsComponentPtr&, const nlohmann::json&)> VisComponentLoader;
+using VisComponentLoader = std::function<void(Entity*, const EntityFactory::Context&, const EntityFactory::VisContext&, VisObjectsComponentPtr&, const SimVisBindingsComponentPtr&, const nlohmann::json&)>;
 
-EntityPtr EntityFactory::createEntityFromJson(const nlohmann::json& json, const std::string& instanceName, const Vector3& position, const Quaternion& orientation) const
+static std::shared_ptr<ScenarioMetadataComponent> createDefaultEntityScenarioMetadataComponent()
 {
-	EntityPtr entity = std::make_shared<sim::Entity>();
+	auto component = std::make_shared<ScenarioMetadataComponent>();
+	component->directory = {"Entity"};
+	return component;
+}
 
-	entity->addComponent(ComponentPtr(new NameComponent(instanceName, mContext.namedObjectRegistry, entity.get())));
+EntityPtr EntityFactory::createEntityFromJson(const nlohmann::json& json, const std::string& instanceName, const Vector3& position, const Quaternion& orientation, EntityId id) const
+{
+	EntityPtr entity = std::make_shared<sim::Entity>((id != nullEntityId()) ? id : generateNextEntityId());
 
-	SimVisBindingsComponentPtr simVisBindingComponent(new SimVisBindingsComponent);
-	entity->addComponent(simVisBindingComponent);
+	// Create required components
+	entity->addComponent(std::make_shared<NameComponent>(instanceName));
 
-	VisObjectsComponentPtr visObjectsComponent(new VisObjectsComponent(mContext.scene));
-	entity->addComponent(visObjectsComponent);
+	VisObjectsComponentPtr visObjectsComponent;
+	SimVisBindingsComponentPtr simVisBindingComponent;
+	if (mContext.visContext)
+	{
+		visObjectsComponent = std::make_shared<VisObjectsComponent>(mContext.visContext->scene);
+		entity->addComponent(visObjectsComponent);
 
+		simVisBindingComponent = std::make_shared<SimVisBindingsComponent>();
+		entity->addComponent(simVisBindingComponent);
+}
+
+	// Create additional components from json
 	ComponentFactoryContext componentFactoryContext;
 	componentFactoryContext.julianDateProvider = mContext.julianDateProvider;
 	componentFactoryContext.scheduler = mContext.scheduler;
 	componentFactoryContext.simWorld = mContext.simWorld;
 	componentFactoryContext.entityFactory = this;
 	componentFactoryContext.stats = mContext.stats;
+	componentFactoryContext.tileSourceFactoryRegistry = mContext.tileSourceFactoryRegistry;
 
 	const nlohmann::json& components = json.at("components");
 	for (const auto& component : components)
@@ -641,28 +646,37 @@ EntityPtr EntityFactory::createEntityFromJson(const nlohmann::json& json, const 
 				}
 			}
 			// Vis components
+			if (mContext.visContext)
 			{
 				static std::map<std::string, VisComponentLoader> visComponentLoaders =
 				{
-					{"camera", loadVisualCamera },
+					{ "camera", loadVisualCamera },
 					{ "particleSystem", loadParticleSystem },
-					{ "planet", loadPlanet },
 					{ "visualModel", loadVisualModel },
 					{ "visualMainRotor", loadVisualMainRotor },
-					{ "visualTailRotor", loadVisualTailRotor }
+					{ "visualTailRotor", loadVisualTailRotor },
+					{ "visualPlanet", loadVisualPlanet }
 				};
 
 				auto it = visComponentLoaders.find(key);
 				if (it != visComponentLoaders.end())
 				{
-					it->second(entity.get(), mContext, visObjectsComponent, simVisBindingComponent, content);
+					assert(visObjectsComponent);
+					assert(simVisBindingComponent);
+					it->second(entity.get(), mContext, *mContext.visContext, visObjectsComponent, simVisBindingComponent, content);
 				}
 			}
 		}
 	}
 
-	Node* node = entity->getFirstComponent<Node>().get();
-	if (node)
+	// Add default ScenarioMetadataComponent if one wasn't in the json file
+	if (!entity->getFirstComponent<ScenarioMetadataComponent>())
+	{
+		entity->addComponent(createDefaultEntityScenarioMetadataComponent());
+	}
+
+	// Initialise entity pose
+	if (Node* node = entity->getFirstComponent<Node>().get(); node)
 	{
 		node->setPosition(position);
 		node->setOrientation(orientation);
@@ -675,18 +689,20 @@ EntityFactory::EntityFactory(const EntityFactory::Context& context, const std::v
 	mContext(context)
 {
 	assert(context.julianDateProvider);
-	assert(context.namedObjectRegistry);
 	assert(context.programs);
 	assert(context.simWorld);
 	assert(context.stats);
 	assert(context.tileSourceFactoryRegistry);
 	assert(context.scene);
-	mBuiltinTemplates = {
-		{"SunBillboard", [this] {return createSun(); }},
-		{"MoonBillboard", [this] {return createMoon(); }},
-		{"Stars", [this] {return createStars(); }},
-		{"Polyline", [this] {return createPolyline(); }}
-	};
+
+	if (context.visContext)
+	{
+		mBuiltinTemplates = {
+			{"SunBillboard", [this] {return createSun(*mContext.visContext); }},
+			{"MoonBillboard", [this] {return createMoon(*mContext.visContext); }},
+			{"Stars", [this] {return createStars(*mContext.visContext); }}
+		};
+	}
 
 	for (const std::filesystem::path& filename : entityFilenames)
 	{
@@ -696,7 +712,7 @@ EntityFactory::EntityFactory(const EntityFactory::Context& context, const std::v
 	}
 }
 
-EntityPtr EntityFactory::createEntity(const std::string& templateName, const std::string& nameIn, const Vector3& position, const Quaternion& orientation) const
+EntityPtr EntityFactory::createEntity(const std::string& templateName, const std::string& nameIn, const Vector3& position, const Quaternion& orientation, EntityId id) const
 {
 	{
 		auto i = mTemplateJsonMap.find(templateName);
@@ -705,7 +721,7 @@ EntityPtr EntityFactory::createEntity(const std::string& templateName, const std
 			std::string name = nameIn.empty() ? createUniqueObjectName(templateName) : nameIn;
 			try
 			{
-				EntityPtr entity = createEntityFromJson(i->second, name, position, orientation);
+				EntityPtr entity = createEntityFromJson(i->second, name, position, orientation, id);
 				entity->addComponent(ComponentPtr(new TemplateNameComponent(templateName)));
 				return entity;
 			}
@@ -752,16 +768,16 @@ static osg::ref_ptr<osg::StateSet> createCelestialBodyStateSet(const osg::ref_pt
 	return ss;
 }
 
-EntityPtr EntityFactory::createSun() const
+EntityPtr EntityFactory::createSun(const EntityFactory::VisContext& visContext) const
 {
 	osg::ref_ptr<osg::StateSet> ss = createCelestialBodyStateSet(
-		mContext.programs->getRequiredProgram("sun"),
+		visContext.programs->getRequiredProgram("sun"),
 		osgDB::readImageFile("Environment/Space/SunDisc.png"));
 
 	osg::ref_ptr<osg::BlendFunc> blendFunc = new osg::BlendFunc;
 	ss->setAttributeAndModes(blendFunc);
 
-	EntityPtr object(new Entity());
+	EntityPtr object(new Entity(generateNextEntityId()));
 	object->addComponent(std::make_shared<Node>());
 
 	float diameterScale = 1.15f; // account for disk in texture being slightly smaller than texture size
@@ -773,7 +789,7 @@ EntityPtr EntityFactory::createSun() const
 	SimVisBindingPtr simVis(new CelestialObjectVisBinding(mContext.julianDateProvider, calcSunEclipticPosition, node));
 	simVisBindingComponent->bindings.push_back(simVis);
 
-	VisObjectsComponentPtr visObjectsComponent(new VisObjectsComponent(mContext.scene));
+	VisObjectsComponentPtr visObjectsComponent(new VisObjectsComponent(visContext.scene));
 	visObjectsComponent->addObject(node);
 	object->addComponent(visObjectsComponent);
 
@@ -788,16 +804,16 @@ EntityPtr EntityFactory::createSun() const
 	return object;
 }
 
-EntityPtr EntityFactory::createMoon() const
+EntityPtr EntityFactory::createMoon(const EntityFactory::VisContext& visContext) const
 {
 	osg::ref_ptr<osg::StateSet> ss = createCelestialBodyStateSet(
-		mContext.programs->getRequiredProgram("moon"),
+		visContext.programs->getRequiredProgram("moon"),
 		osgDB::readImageFile("Environment/Space/MoonDisc.jpg"));
 
 	osg::Uniform* moonPhaseUniform = new osg::Uniform("moonPhase", 0.5f);
 	ss->addUniform(moonPhaseUniform);
 
-	EntityPtr object(new Entity());
+	EntityPtr object(new Entity(generateNextEntityId()));
 	object->addComponent(std::make_shared<Node>());
 
 	vis::RootNodePtr node(new vis::CameraRelativeBillboard(ss, moonDiameter, moonDiameter, moonDistance));
@@ -807,22 +823,22 @@ EntityPtr EntityFactory::createMoon() const
 	simVisBindingComponent->bindings.push_back(simVis);
 	object->addComponent(simVisBindingComponent);
 
-	VisObjectsComponentPtr visObjectsComponent(new VisObjectsComponent(mContext.scene));
+	VisObjectsComponentPtr visObjectsComponent(new VisObjectsComponent(visContext.scene));
 	visObjectsComponent->addObject(node);
 	object->addComponent(visObjectsComponent);
 
 	return object;
 }
 
-EntityPtr EntityFactory::createStars() const
+EntityPtr EntityFactory::createStars(const EntityFactory::VisContext& visContext) const
 {
 	vis::StarfieldConfig config;
-	config.program = mContext.programs->getRequiredProgram("starfield");
+	config.program = visContext.programs->getRequiredProgram("starfield");
 	vis::RootNodePtr starfield(new vis::Starfield(config));
 
 	auto calcStarfieldEclipticPosition = [](double julianDate) { return LatLon(0, 0); };
 
-	EntityPtr object(new Entity());
+	EntityPtr object(new Entity(generateNextEntityId()));
 	object->addComponent(std::make_shared<Node>());
 
 	SimVisBindingsComponentPtr simVisBindingComponent(new SimVisBindingsComponent);
@@ -830,30 +846,8 @@ EntityPtr EntityFactory::createStars() const
 	simVisBindingComponent->bindings.push_back(simVis);
 	object->addComponent(simVisBindingComponent);
 
-	VisObjectsComponentPtr visObjectsComponent(new VisObjectsComponent(mContext.scene));
+	VisObjectsComponentPtr visObjectsComponent(new VisObjectsComponent(visContext.scene));
 	visObjectsComponent->addObject(starfield);
-	object->addComponent(visObjectsComponent);
-
-	return object;
-}
-
-EntityPtr EntityFactory::createPolyline() const
-{
-	vis::Polyline::Params params;
-	params.program = mContext.programs->getRequiredProgram("unlitColored");
-
-	vis::PolylinePtr polyline(new vis::Polyline(params));
-
-	EntityPtr object(new Entity());
-	object->addComponent(std::make_shared<Node>());
-
-	SimVisBindingsComponentPtr simVisBindingComponent(new SimVisBindingsComponent);
-	simVisBindingComponent->bindings.push_back(std::make_shared<PolylineVisBinding>(polyline));
-	object->addComponent(simVisBindingComponent);
-
-	VisObjectsComponentPtr visObjectsComponent(new VisObjectsComponent(mContext.scene));
-	visObjectsComponent->addObject(polyline);
-
 	object->addComponent(visObjectsComponent);
 
 	return object;
@@ -864,7 +858,7 @@ std::string EntityFactory::createUniqueObjectName(const std::string& baseName) c
 	for (int i = 1; i < INT_MAX; ++i)
 	{
 		std::string name = baseName + std::to_string(i);
-		if (mContext.namedObjectRegistry->getObjectByName(name) == nullptr)
+		if (mContext.simWorld->findObjectByName(name) == nullptr)
 		{
 			return name;
 		}
@@ -872,3 +866,8 @@ std::string EntityFactory::createUniqueObjectName(const std::string& baseName) c
 	throw skybolt::Exception("Could not create unique object name from base name: " + baseName);
 }
 
+sim::EntityId EntityFactory::generateNextEntityId() const
+{
+	++mNextEntityId.entityId;
+	return mNextEntityId;
+}

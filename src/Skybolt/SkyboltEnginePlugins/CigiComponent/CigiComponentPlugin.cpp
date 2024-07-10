@@ -4,16 +4,17 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
+#include "CigiComponentPlugin.h"
 #include "CigiClient.h"
 
 #include <SkyboltEngine/EngineRoot.h>
+#include <SkyboltEngine/Scenario/ScenarioMetadataComponent.h>
 #include <SkyboltEngine/Plugin/Plugin.h>
 #include <SkyboltSim/SimMath.h>
 #include <SkyboltSim/World.h>
 #include <SkyboltSim/Components/AttachmentComponent.h>
 #include <SkyboltSim/Components/CameraComponent.h>
-#include <SkyboltSim/Components/ParentReferenceComponent.h>
-#include <SkyboltSim/Components/ProceduralLifetimeComponent.h>
+#include <SkyboltSim/Components/NameComponent.h>
 #include <SkyboltSim/Spatial/Geocentric.h>
 #include <SkyboltSim/Spatial/GreatCircle.h>
 #include <SkyboltSim/Spatial/LatLonAlt.h>
@@ -62,8 +63,11 @@ private:
 class MyCigiCamera : public CigiCamera
 {
 public:
-	MyCigiCamera(const sim::EntityPtr& entity) : mEntity(entity)
+	MyCigiCamera(const sim::World* world, const sim::EntityPtr& entity) :
+		mWorld(world),
+		mEntity(entity)
 	{
+		assert(mWorld);
 		mCameraComponent = mEntity->getFirstComponent<sim::CameraComponent>();
 	}
 
@@ -73,14 +77,14 @@ public:
 		{
 			if (parent)
 			{
-				auto targetEntity = static_cast<MyCigiEntity*>(parent.get())->mEntity;
+				auto parentEntity = static_cast<MyCigiEntity*>(parent.get())->mEntity;
 
 				AttachmentParams params;
 				params.positionRelBody = math::dvec3Zero();
 				params.orientationRelBody = math::dquatIdentity();
 
-				mAttachmentComponent = std::make_shared<AttachmentComponent>(params, mEntity.get());
-				mAttachmentComponent->resetTarget(targetEntity.get());
+				mAttachmentComponent = std::make_shared<AttachmentComponent>(params, mWorld, mEntity.get());
+				mAttachmentComponent->setParentEntityId(parentEntity->getId());
 				mEntity->addComponent(mAttachmentComponent);
 			}
 			else
@@ -111,6 +115,7 @@ public:
 		mCameraComponent->getState().fovY = fov;
 	}
 
+	const sim::World* mWorld;
 	sim::EntityPtr mEntity;
 	CigiEntityPtr mParent;
 	std::shared_ptr<sim::CameraComponent> mCameraComponent;
@@ -136,11 +141,10 @@ public:
 		{
 			std::string templateName = it->second;
 			sim::EntityPtr entity = mEngineRoot->entityFactory->createEntity(templateName);
-			entity->addComponent(std::make_shared<ParentReferenceComponent>(mCigiGatewayEntity));
-			entity->addComponent(std::make_shared<ProceduralLifetimeComponent>());
+			entity->addComponent(createScenarioMetadataComponent());
 			entity->setDynamicsEnabled(false);
 
-			mEngineRoot->simWorld->addEntity(entity);
+			mEngineRoot->scenario->world.addEntity(entity);
 			return std::make_shared<MyCigiEntity>(entity);
 		}
 		return nullptr;
@@ -149,22 +153,31 @@ public:
 	void destroyEntity(const CigiEntityPtr& cigiEntity) override
 	{
 		sim::EntityPtr simEntity = static_cast<MyCigiEntity*>(cigiEntity.get())->mEntity;
-		mEngineRoot->simWorld->removeEntity(simEntity.get());
+		mEngineRoot->scenario->world.removeEntity(simEntity.get());
 	}
 
 	CigiCameraPtr createCamera() override
 	{
 		sim::EntityPtr entity = mEngineRoot->entityFactory->createEntity("Camera");
-		entity->addComponent(std::make_shared<ParentReferenceComponent>(mCigiGatewayEntity));
-		entity->addComponent(std::make_shared<ProceduralLifetimeComponent>());
-		mEngineRoot->simWorld->addEntity(entity);
-		return std::make_shared<MyCigiCamera>(entity);
+		entity->addComponent(createScenarioMetadataComponent());
+		mEngineRoot->scenario->world.addEntity(entity);
+		return std::make_shared<MyCigiCamera>(&mEngineRoot->scenario->world, entity);
 	}
 
 	void destroyCamera(const CigiCameraPtr& cigiCamera) override
 	{
 		sim::EntityPtr simEntity = static_cast<MyCigiCamera*>(cigiCamera.get())->mEntity;
-		mEngineRoot->simWorld->removeEntity(simEntity.get());
+		mEngineRoot->scenario->world.removeEntity(simEntity.get());
+	}
+
+private:
+	std::shared_ptr<ScenarioMetadataComponent> createScenarioMetadataComponent() const
+	{
+		auto metadata = std::make_shared<ScenarioMetadataComponent>();
+		metadata->serializable = false;
+		metadata->deletable = false;
+		metadata->directory = { "Entity", getName(*mCigiGatewayEntity) };
+		return metadata;
 	}
 
 private:
@@ -185,7 +198,11 @@ public:
 		assert(mClient);
 	}
 
-	void updatePreDynamics(sim::TimeReal dt, sim::TimeReal dtWallClock) override
+	SKYBOLT_BEGIN_REGISTER_UPDATE_HANDLERS
+		SKYBOLT_REGISTER_UPDATE_HANDLER(sim::UpdateStage::Input, update)
+	SKYBOLT_END_REGISTER_UPDATE_HANDLERS
+
+	void update()
 	{
 		mClient->sendFrame();
 		mClient->update();
@@ -197,62 +214,55 @@ private:
 
 const std::string cigiComponentName = "cigi";
 
-class CigiComponentPlugin : public Plugin
+CigiComponentPlugin::CigiComponentPlugin(const PluginConfig& config) :
+	mComponentFactoryRegistry(config.simComponentFactoryRegistry)
 {
-public:
-	CigiComponentPlugin(const PluginConfig& config) :
-		mComponentFactoryRegistry(config.simComponentFactoryRegistry)
-	{
-		EngineRoot* engineRoot = config.engineRoot;
+	EngineRoot* engineRoot = config.engineRoot;
 
-		auto factory = std::make_shared<ComponentFactoryFunctionAdapter>([=](Entity* entity, const ComponentFactoryContext& context, const nlohmann::json& json) {
+	auto factory = std::make_shared<ComponentFactoryFunctionAdapter>([=](Entity* entity, const ComponentFactoryContext& context, const nlohmann::json& json) {
 
-			TemplatesMap templatesMap;
+		TemplatesMap templatesMap;
 
-			CigiClientConfig clientConfig;
-			clientConfig.cigiMajorVersion = json.at("cigiMajorVersion").get<int>();
-			clientConfig.host = json.at("hostAddress").get<std::string>();
-			clientConfig.hostPort = json.at("hostPort").get<int>();
-			clientConfig.igPort = json.at("igPort").get<int>();
+		CigiClientConfig clientConfig;
+		clientConfig.cigiMajorVersion = json.at("cigiMajorVersion").get<int>();
+		clientConfig.host = json.at("hostAddress").get<std::string>();
+		clientConfig.hostPort = json.at("hostPort").get<int>();
+		clientConfig.igPort = json.at("igPort").get<int>();
 			 
-			auto it = json.find("entityTypes");
-			if (it != json.end())
+		auto it = json.find("entityTypes");
+		if (it != json.end())
+		{
+			for (const auto& type : it.value().items())
 			{
-				for (const auto& type : it.value().items())
-				{
-					int id = std::stoi(type.key());
-					templatesMap[id] = type.value().get<std::string>();
-				}
+				int id = std::stoi(type.key());
+				templatesMap[id] = type.value().get<std::string>();
 			}
+		}
 
-			clientConfig.world = std::make_shared<CigiSkyboltWorld>(engineRoot, templatesMap, entity);
+		clientConfig.world = std::make_shared<CigiSkyboltWorld>(engineRoot, templatesMap, entity);
 
-			auto communicator = std::make_shared<CigiClient>(clientConfig);
+		auto communicator = std::make_shared<CigiClient>(clientConfig);
 
-			return std::make_shared<CigiComponent>(communicator);
-		});
+		return std::make_shared<CigiComponent>(communicator);
+	});
 
-		mComponentFactoryRegistry->insert(std::make_pair(cigiComponentName, factory));
-	}
+	mComponentFactoryRegistry->insert(std::make_pair(cigiComponentName, factory));
+}
 
-	~CigiComponentPlugin()
-	{
-		mComponentFactoryRegistry->erase(cigiComponentName);
-	}
-
-private:
-	ComponentFactoryRegistryPtr mComponentFactoryRegistry;
-};
+CigiComponentPlugin::~CigiComponentPlugin()
+{
+	mComponentFactoryRegistry->erase(cigiComponentName);
+}
 
 namespace plugins {
 
-	std::shared_ptr<Plugin> createEnginePlugin(const PluginConfig& config)
+	std::shared_ptr<Plugin> createCigiComponentPlugin(const PluginConfig& config)
 	{
 		return std::make_shared<CigiComponentPlugin>(config);
 	}
 
 	BOOST_DLL_ALIAS(
-		plugins::createEnginePlugin,
+		plugins::createCigiComponentPlugin,
 		createEnginePlugin
 	)
 }

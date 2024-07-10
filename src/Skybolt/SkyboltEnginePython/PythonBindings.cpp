@@ -8,20 +8,20 @@
 #include <SkyboltEngine/EngineRootFactory.h>
 #include <SkyboltEngine/EntityFactory.h>
 #include <SkyboltEngine/WindowUtil.h>
+#include <SkyboltEngine/Components/TemplateNameComponent.h>
+#include <SkyboltEngine/Components/VisObjectsComponent.h>
+#include <SkyboltEngine/Scenario/ScenarioMetadataComponent.h>
 #include <SkyboltEngine/SimVisBinding/CameraSimVisBinding.h>
 #include <SkyboltEngine/SimVisBinding/SimVisSystem.h>
-#include <SkyboltEngine/VisObjectsComponent.h>
 #include <SkyboltSim/Entity.h>
 #include <SkyboltSim/World.h>
 #include <SkyboltSim/CameraController/CameraController.h>
 #include <SkyboltSim/CameraController/CameraControllerSelector.h>
+#include <SkyboltSim/CameraController/Targetable.h>
 #include <SkyboltSim/Components/CameraComponent.h>
 #include <SkyboltSim/Components/CameraControllerComponent.h>
-#include <SkyboltSim/Components/OrbitComponent.h>
 #include <SkyboltSim/Components/MainRotorComponent.h>
 #include <SkyboltSim/Components/NameComponent.h>
-#include <SkyboltSim/Components/ParentReferenceComponent.h>
-#include <SkyboltSim/Components/ProceduralLifetimeComponent.h>
 #include <SkyboltSim/Spatial/Frustum.h>
 #include <SkyboltSim/Spatial/GreatCircle.h>
 #include <SkyboltSim/Spatial/Orientation.h>
@@ -44,6 +44,7 @@
 #include <pybind11/pybind11.h>
 #include <pybind11/operators.h>
 #include <pybind11/stl.h>
+#include <pybind11/stl_bind.h>
 
 namespace py = pybind11;
 
@@ -132,10 +133,7 @@ static bool attachCameraToWindowWithEngine(sim::Entity& camera, vis::Window& win
 static void stepSim(EngineRoot& engineRoot, double dt)
 {
 	SimStepper stepper(engineRoot.systemRegistry);
-	System::StepArgs args;
-	args.dtSim = dt;
-	args.dtWallClock = dt;
-	stepper.step(args);
+	stepper.step(dt);
 }
 
 static bool render(EngineRoot& engineRoot, vis::VisRoot& visRoot)
@@ -164,7 +162,11 @@ static py::array_t<std::uint8_t> captureScreenshotToImage(vis::VisRoot& visRoot)
     return result;
 }
 
+PYBIND11_MAKE_OPAQUE(std::vector<std::string>);
+
 PYBIND11_MODULE(skybolt, m) {
+	py::bind_vector<std::vector<std::string>>(m, "VectorString");
+
 	py::class_<Vector3>(m, "Vector3")
 		.def(py::init())
 		.def(py::init<double, double, double>())
@@ -220,15 +222,6 @@ PYBIND11_MODULE(skybolt, m) {
 		.def("merge", &Box3d::merge)
 		.def_readwrite("minimum", &Box3d::minimum)
 		.def_readwrite("maximum", &Box3d::maximum);
-
-	py::class_<Orbit>(m, "Orbit")
-		.def(py::init())
-		.def_readwrite("semiMajorAxis", &Orbit::semiMajorAxis)
-		.def_readwrite("eccentricity", &Orbit::eccentricity)
-		.def_readwrite("inclination", &Orbit::inclination)
-		.def_readwrite("rightAscension", &Orbit::rightAscension)
-		.def_readwrite("argumentOfPeriapsis", &Orbit::argumentOfPeriapsis)
-		.def_readwrite("trueAnomaly", &Orbit::trueAnomaly);
 		
 	py::class_<CameraState>(m, "CameraState")
 		.def(py::init())
@@ -259,11 +252,11 @@ PYBIND11_MODULE(skybolt, m) {
 		.def(py::init<Quaternion>())
 		.def_readwrite("orientation", &LtpNedOrientation::orientation);
 
-	py::class_<Component, std::shared_ptr<Component>>(m, "Component");
+	py::class_<EntityId, std::shared_ptr<EntityId>>(m, "EntityId")
+		.def_readwrite("applicationId", &EntityId::applicationId)
+		.def_readwrite("entityId", &EntityId::entityId);
 
-	py::class_<OrbitComponent, std::shared_ptr<OrbitComponent>, Component>(m, "OrbitComponent")
-		.def(py::init())
-		.def_readwrite("orbit", &OrbitComponent::orbit);
+	py::class_<Component, std::shared_ptr<Component>>(m, "Component");
 
 	py::class_<MainRotorComponent, std::shared_ptr<MainRotorComponent>, Component>(m, "MainRotorComponent")
 		.def("getPitchAngle", &MainRotorComponent::getPitchAngle)
@@ -271,9 +264,13 @@ PYBIND11_MODULE(skybolt, m) {
 		.def("getTppOrientationRelBody", &MainRotorComponent::getTppOrientationRelBody)
 		.def("setNormalizedRpm", &MainRotorComponent::setNormalizedRpm);
 
-	py::class_<ParentReferenceComponent, std::shared_ptr<ParentReferenceComponent>, Component>(m, "ParentReferenceComponent")
-		.def(py::init<sim::Entity*>())
-		.def("getParent", &ParentReferenceComponent::getParent);
+	py::class_<ScenarioMetadataComponent, std::shared_ptr<ScenarioMetadataComponent>, Component>(m, "ScenarioMetadataComponent")
+		.def_readwrite("serializable", &ScenarioMetadataComponent::serializable)
+		.def_readwrite("deletable", &ScenarioMetadataComponent::deletable)
+		.def_readwrite("directory", &ScenarioMetadataComponent::directory);
+
+	py::class_<TemplateNameComponent, std::shared_ptr<TemplateNameComponent>, Component>(m, "TemplateNameComponent")
+		.def_readonly("name", &TemplateNameComponent::name);
 
 	py::class_<CameraComponent, std::shared_ptr<CameraComponent>, Component>(m, "CameraComponent")
 		.def_property("state",
@@ -281,21 +278,19 @@ PYBIND11_MODULE(skybolt, m) {
 			[](CameraComponent& c, const CameraState& state) { CameraState& s = c.getState(); s = state; },
 			py::return_value_policy::reference_internal);
 
-	py::class_<CameraControllerComponent, std::shared_ptr<CameraControllerComponent>, Component>(m, "CameraControllerComponent")
-		.def_property_readonly("cameraController", [](const CameraControllerComponent& c) { return c.cameraController.get(); }, py::return_value_policy::reference_internal);
-
-	py::class_<ProceduralLifetimeComponent, std::shared_ptr<ProceduralLifetimeComponent>, Component>(m, "ProceduralLifetimeComponent")
-		.def(py::init());
-
-	py::class_<CameraController>(m, "CameraController")
-		.def("getTarget", &CameraController::getTarget)
-		.def("setTarget", &CameraController::setTarget);
-
-	py::class_<CameraControllerSelector, CameraController>(m, "CameraControllerSelector")
+	py::class_<CameraControllerSelector, std::shared_ptr<CameraControllerSelector>>(m, "CameraControllerSelector")
 		.def("selectController", &CameraControllerSelector::selectController)
-		.def("getSelectedControllerName", &CameraControllerSelector::getSelectedControllerName);
+		.def("getSelectedControllerName", &CameraControllerSelector::getSelectedControllerName)
+		.def("setTargetId", &CameraControllerSelector::setTargetId);
+
+	py::class_<CameraControllerComponent, std::shared_ptr<CameraControllerComponent>, Component, CameraControllerSelector>(m, "CameraControllerComponent");
+
+	py::class_<Targetable>(m, "Targetable")
+		.def("getTargetId", &Targetable::getTargetId)
+		.def("setTargetId", &Targetable::setTargetId);
 
 	py::class_<Entity, std::shared_ptr<Entity>>(m, "Entity")
+		.def("getId", &Entity::getId)
 		.def("getName", [](Entity* entity) { return getName(*entity); })
 		.def("getPosition", [](Entity* entity) {
 			return *getPosition(*entity);
@@ -319,19 +314,21 @@ PYBIND11_MODULE(skybolt, m) {
 		.def("getEntities", &World::getEntities, py::return_value_policy::reference)
 		.def("addEntity", &World::addEntity)
 		.def("removeEntity", &World::removeEntity)
-		.def("removeAllEntities", &World::removeAllEntities);
+		.def("removeAllEntities", &World::removeAllEntities)
+		.def("findObjectByName", &World::findObjectByName);
 
 	py::class_<EntityFactory>(m, "EntityFactory")
 		.def("createEntity", &EntityFactory::createEntity, py::return_value_policy::reference,
-			py::arg("templateName"), py::arg("name") = "", py::arg("position") = math::dvec3Zero(), py::arg("orientation") = math::dquatIdentity());
+			py::arg("templateName"), py::arg("name") = "", py::arg("position") = math::dvec3Zero(), py::arg("orientation") = math::dquatIdentity(), py::arg("id") = sim::nullEntityId());
 
 	py::class_<Scenario>(m, "Scenario")
-		.def_readwrite("startJulianDate", &Scenario::startJulianDate);
+		.def_readwrite("startJulianDate", &Scenario::startJulianDate)
+		.def_property_readonly("currentJulianDate", [](Scenario* scenario) {return getCurrentJulianDate(*scenario); });
 
 	py::class_<EngineRoot>(m, "EngineRoot")
-		.def_property_readonly("world", [](const EngineRoot& r) {return r.simWorld.get(); }, py::return_value_policy::reference_internal)
+		.def_property_readonly("world", [](const EngineRoot& r) {return &r.scenario->world; }, py::return_value_policy::reference_internal)
 		.def_property_readonly("entityFactory", [](const EngineRoot& r) {return r.entityFactory.get(); }, py::return_value_policy::reference_internal)
-		.def_property_readonly("scenario", [](const EngineRoot& r) {return &r.scenario; }, py::return_value_policy::reference_internal);
+		.def_property_readonly("scenario", [](const EngineRoot& r) {return r.scenario.get(); }, py::return_value_policy::reference_internal);
 
 	py::class_<vis::VisRoot>(m, "VisRoot")
 		.def(py::init())
@@ -371,6 +368,5 @@ PYBIND11_MODULE(skybolt, m) {
 	m.def("captureScreenshot", [](vis::VisRoot& visRoot, const std::string& filename) { return vis::captureScreenshot(visRoot, filename); });
 	m.def("moveDistanceAndBearing", &moveDistanceAndBearing);
 	m.def("transformToScreenSpace", &transformToScreenSpace);
-	m.def("findObjectByName", &findObjectByName);
 	m.def("setWaveHeight", &setWaveHeight);
 }

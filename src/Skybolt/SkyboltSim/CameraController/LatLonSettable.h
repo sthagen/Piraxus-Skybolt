@@ -15,12 +15,19 @@ class LatLonSettable
 {
 public:
 	virtual ~LatLonSettable() = default;
-	virtual LatLon getLatLon() const { return mLatLon; }
+	virtual const LatLon& getLatLon() const { return mLatLon; }
 	virtual void setLatLon(const LatLon& latLon) { mLatLon = latLon; }
 
 protected:
 	LatLon mLatLon = LatLon(0,0);
 };
+
+SKYBOLT_REFLECT_BEGIN(LatLonSettable)
+{
+	registry.type<LatLonSettable>("LatLonSettable")
+		.property("latLon", &LatLonSettable::getLatLon, &LatLonSettable::setLatLon);
+}
+SKYBOLT_REFLECT_END
 
 } // namespace sim
 } // namespace skybolt

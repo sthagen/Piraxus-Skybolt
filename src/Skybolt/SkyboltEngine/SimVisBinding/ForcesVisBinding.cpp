@@ -6,12 +6,15 @@
 
 #include "ForcesVisBinding.h"
 #include "GeocentricToNedConverter.h"
+
 #include <SkyboltSim/Components/DynamicBodyComponent.h>
 #include <SkyboltSim/Components/Node.h>
 #include <SkyboltSim/Spatial/Geocentric.h>
 #include <SkyboltSim/Spatial/Position.h>
 #include <SkyboltSim/World.h>
+#include <SkyboltVis/Scene.h>
 #include <SkyboltVis/Renderable/Arrows.h>
+#include <SkyboltVis/Shader/ShaderProgramRegistry.h>
 #include <assert.h>
 
 namespace skybolt {
@@ -21,7 +24,7 @@ constexpr double forceScaleMetersPerNewton = 0.0001;
 ForcesVisBinding::ForcesVisBinding(sim::World* world, const vis::ArrowsPtr& arrows) :
 	mWorld(world),
 	mArrows(arrows),
-	mVisibilityPredicate(visibilityOn)
+	mEntityVisibilityPredicate(visibilityOn)
 {
 	assert(mWorld);
 	assert(mArrows);
@@ -34,7 +37,7 @@ void ForcesVisBinding::syncVis(const GeocentricToNedConverter& converter)
 	const auto& entities = mWorld->getEntities();
 	for (const sim::EntityPtr& entity : entities)
 	{
-		if (mVisibilityPredicate(*entity))
+		if (mEntityVisibilityPredicate(*entity))
 		{
 			if (entity->isDynamicsEnabled())
 			{
@@ -60,6 +63,19 @@ void ForcesVisBinding::syncVis(const GeocentricToNedConverter& converter)
 	}
 
 	mArrows->setSegments(segments);
+}
+
+std::shared_ptr<ForcesVisBinding> createForcesVisBinding(sim::World* world, const vis::ScenePtr& scene, const vis::ShaderPrograms& programs)
+{
+	vis::Arrows::Params params;
+	params.program = programs.getRequiredProgram("unlitColored");
+
+	auto arrows = std::make_shared<vis::Arrows>(params);
+	scene->addObject(arrows);
+	return std::shared_ptr<ForcesVisBinding>(new ForcesVisBinding(world, arrows), [scene, arrows] (ForcesVisBinding* binding) {
+		scene->removeObject(arrows);
+		delete binding;
+	});
 }
 
 } // namespace skybolt

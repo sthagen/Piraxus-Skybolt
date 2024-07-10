@@ -25,14 +25,21 @@ public:
 	SimVisSystem(const sim::World* world, const vis::ScenePtr& scene);
 	~SimVisSystem();
 
-	void updatePostDynamics(const System::StepArgs& args) override;
+	SKYBOLT_BEGIN_REGISTER_UPDATE_HANDLERS
+		SKYBOLT_REGISTER_UPDATE_HANDLER(sim::UpdateStage::Output, updateState)
+	SKYBOLT_END_REGISTER_UPDATE_HANDLERS
+
+	void updateState();
+
+	void addBinding(const SimVisBindingPtr& simVisBindings);
+	void removeBinding(const SimVisBindingPtr& simVisBindings);
 
 	const GeocentricToNedConverter& getCoordinateConverter() const { return *mCoordinateConverter; }
 
 	void setSceneOriginProvider(SceneOriginProvider sceneOriginProvider) { mSceneOriginProvider = std::move(sceneOriginProvider); }
 
 	static SceneOriginProvider sceneOriginFromPosition(const sim::Vector3& position);
-	static SceneOriginProvider sceneOriginFromEntity(const sim::EntityPtr& entity);
+	static SceneOriginProvider sceneOriginFromEntity(const sim::World* world, const sim::EntityId& entity);
 	static SceneOriginProvider sceneOriginFromFirstCamera(const sim::World* world);
 
 private:
@@ -40,6 +47,7 @@ private:
 	vis::ScenePtr mScene;
 	SceneOriginProvider mSceneOriginProvider;
 	std::unique_ptr<GeocentricToNedConverter> mCoordinateConverter;
+	std::vector<SimVisBindingPtr> mSimVisBindings;
 };
 
 } // namespace skybolt

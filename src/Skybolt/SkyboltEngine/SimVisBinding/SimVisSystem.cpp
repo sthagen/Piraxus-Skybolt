@@ -8,12 +8,14 @@
 #include "EngineRoot.h"
 #include "SimVisBinding/GeocentricToNedConverter.h"
 #include "SimVisBinding/SimVisBinding.h"
+#include <SkyboltCommon/VectorUtility.h>
 #include <SkyboltSim/Components/CameraComponent.h>
 #include <SkyboltSim/Components/Node.h>
 #include <SkyboltSim/Components/PlanetComponent.h>
 #include <SkyboltSim/Entity.h>
 #include <SkyboltSim/World.h>
 #include <SkyboltSim/WorldUtil.h>
+#include <SkyboltVis/Scene.h>
 #include <assert.h>
 
 namespace skybolt {
@@ -34,12 +36,12 @@ SimVisSystem::~SimVisSystem()
 {
 }
 
-void SimVisSystem::updatePostDynamics(const System::StepArgs& args)
+void SimVisSystem::updateState()
 {
 	Vector3 origin = mSceneOriginProvider();
 
 	// Get nearest planet
-	sim::Entity* planet = findNearestEntityWithComponent<sim::PlanetComponent>(mWorld->getEntities(), origin);
+	sim::Entity* planet = findNearestEntityWithComponent<sim::PlanetComponent>(mWorld->getEntities(), origin).get();
 	std::optional<GeocentricToNedConverter::PlanetPose> planetPose;
 	if (planet)
 	{
@@ -67,6 +69,21 @@ void SimVisSystem::updatePostDynamics(const System::StepArgs& args)
 	mCoordinateConverter->setOrigin(origin, planetPose);
 
 	syncVis(*mWorld, *mCoordinateConverter);
+
+	for (const auto& binding : mSimVisBindings)
+	{
+		binding->syncVis(*mCoordinateConverter);
+	}
+}
+
+void SimVisSystem::addBinding(const SimVisBindingPtr& simVisBindings)
+{
+	mSimVisBindings.push_back(simVisBindings);
+}
+
+void SimVisSystem::removeBinding(const SimVisBindingPtr& simVisBindings)
+{
+	eraseFirst(mSimVisBindings, simVisBindings);
 }
 
 SimVisSystem::SceneOriginProvider SimVisSystem::sceneOriginFromPosition(const sim::Vector3& position)
@@ -74,12 +91,16 @@ SimVisSystem::SceneOriginProvider SimVisSystem::sceneOriginFromPosition(const si
 	return [=] { return position; };
 }
 
-SimVisSystem::SceneOriginProvider SimVisSystem::sceneOriginFromEntity(const sim::EntityPtr& entity)
+SimVisSystem::SceneOriginProvider SimVisSystem::sceneOriginFromEntity(const sim::World* world, const sim::EntityId& entityId)
 {
+	assert(world);
 	return [=]{
-		auto position = getPosition(*entity);
+		if (sim::Entity* entity = world->getEntityById(entityId).get(); entity)
 		{
-			return *position;
+			auto position = getPosition(*entity);
+			{
+				return *position;
+			}
 		}
 		return sim::Vector3(0, 0, 0);
 	};

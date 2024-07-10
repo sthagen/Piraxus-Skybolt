@@ -39,12 +39,20 @@ public:
 	typedef std::vector<EntityPtr> Entities;
 	inline const Entities &getEntities() const { return mEntities; }
 
+	//! @return null if entity not found
+	EntityPtr getEntityById(EntityId id) const;
+
+	//! @return null if entity not found
+	EntityPtr findObjectByName(const std::string& name) const;
+
 private:
 	Entities mEntities;
+	std::map<EntityId, EntityPtr> mIdToEntityMap;
+	std::map<std::string, EntityPtr> mNameToEntityMap;
+
 	bool mDestructing = false;
 };
 
-EntityPtr findObjectByName(const World& world, const std::string& name);
 
 } // namespace sim
 } // namespace skybolt

@@ -7,6 +7,7 @@
 
 #include "OrbitCameraController.h"
 #include "SkyboltSim/Entity.h"
+#include "SkyboltSim/World.h"
 #include "SkyboltSim/Components/CameraComponent.h"
 #include "SkyboltSim/Components/Node.h"
 #include <SkyboltCommon/Math/FirstOrderLag.h>
@@ -14,22 +15,31 @@
 
 #include <assert.h>
 
-using namespace skybolt::sim;
-using namespace skybolt;
+namespace skybolt::sim {
 
-const float OrbitCameraController::msYawRate = 0.01f;
-const float OrbitCameraController::msPitchRate = 0.01f;
-const float OrbitCameraController::msZoomRate = 0.001f;
+const float OrbitCameraController::msYawRate = 1.0f;
+const float OrbitCameraController::msPitchRate = 1.0f;
+const float OrbitCameraController::msZoomRate = 1.0f;
 const float OrbitCameraController::msPlanetAlignTransitionRate = 2.0f;
 
+SKYBOLT_REFLECT_BEGIN(OrbitCameraController)
+{
+	registry.type<OrbitCameraController>("OrbitCameraController")
+		.superType<CameraController>()
+		.superType<Pitchable>()
+		.superType<Targetable>()
+		.superType<Yawable>()
+		.superType<Zoomable>();
+}
+SKYBOLT_REFLECT_END
 
-OrbitCameraController::OrbitCameraController(sim::Entity* camera, const Params& params) :
+OrbitCameraController::OrbitCameraController(sim::Entity* camera, sim::World* world, const Params& params) :
 	CameraController(camera),
+	Targetable(world),
 	mParams(params),
 	mTargetOffset(0,0,0),
     mFilteredPlanetUp(0,0,0),
-	mTargetPosition(0,0,0),
-	mPrevTarget(nullptr)
+	mTargetPosition(0,0,0)
 {
 	setZoom(0.5f);
 }
@@ -52,30 +62,33 @@ static Quaternion safeSlerp(const Quaternion& a, const Quaternion& b, double t)
 	return glm::slerp(sSafe, b, t);
 }
 
-void OrbitCameraController::updatePostDynamicsSubstep(TimeReal dtSubstep)
+void OrbitCameraController::updatePostDynamicsSubstep(SecondsD dtSubstep)
 {
-	Quaternion orientation = *getOrientation(*mTarget);
-	if (mSmoothedTargetOrientation)
+	if (Entity* entity = getTarget(); entity)
 	{
-		orientation = safeSlerp(*mSmoothedTargetOrientation, orientation, (double)calcFirstOrderLagInterpolationFactor(dtSubstep, mLagTimeConstant));
+		Quaternion orientation = *getOrientation(*entity);
+		if (mSmoothedTargetOrientation)
+		{
+			orientation = safeSlerp(*mSmoothedTargetOrientation, orientation, calcFirstOrderLagInterpolationFactor(dtSubstep, double(mLagTimeConstant)));
+		}
+		mSmoothedTargetOrientation = orientation;
 	}
-	mSmoothedTargetOrientation = orientation;
 }
 
-void OrbitCameraController::update(float dt)
+void OrbitCameraController::update(SecondsD dt)
 {
-	if (mTarget != mPrevTarget)
+	if (mTargetId != mPrevTargetId)
 	{
 		resetFiltering();
-		mPrevTarget = mTarget;
+		mPrevTargetId = mTargetId;
 	}
 
 	mCameraComponent->getState().fovY = mParams.fovY;
 
-	mYaw += msYawRate * mInput.panSpeed * dt;
-	mPitch += msPitchRate * mInput.tiltSpeed * dt;
-	float wheel = mInput.zoomSpeed * dt;
-	mZoom = math::clamp(mZoom + wheel * msZoomRate, 0.0f, 1.0f);
+	mYaw += msYawRate * mInput.yawRate * dt;
+	mPitch += msPitchRate * mInput.tiltRate * dt;
+	mZoom += msZoomRate * mInput.zoomRate * dt;
+	mZoom = math::clamp(mZoom, 0.0, 1.0);
     
     double maxPitch = math::halfPiD();
     mPitch = math::clamp(mPitch, -maxPitch, maxPitch);
@@ -87,10 +100,10 @@ void OrbitCameraController::update(float dt)
 
 	CameraState& state = mCameraComponent->getState();
 
-	if (mTarget)
+	if (sim::Entity* target = getTarget(); target)
 	{
 		state.nearClipDistance = 0.5;
-		auto optionalPosition = getPosition(*mTarget);
+		auto optionalPosition = getPosition(*target);
 		if (optionalPosition)
 		{
 			mTargetPosition = *optionalPosition;
@@ -140,7 +153,7 @@ void OrbitCameraController::update(float dt)
 			{
 				if (!mSmoothedTargetOrientation)
 				{
-					mSmoothedTargetOrientation = *getOrientation(*mTarget);
+					mSmoothedTargetOrientation = *getOrientation(*target);
 				}
 				mNodeComponent->setOrientation(*mSmoothedTargetOrientation * glm::angleAxis(mYaw, Vector3(0, 0, 1)) * glm::angleAxis(mPitch, Vector3(0, 1, 0)));
 			}
@@ -148,13 +161,10 @@ void OrbitCameraController::update(float dt)
 	}
 
 	// Zoom control
-	float dist = mParams.maxDist + mZoom * (mParams.minDist - mParams.maxDist);
+	double dist = mParams.maxDist + mZoom * (mParams.minDist - mParams.maxDist);
 
 	// Derive camera position
 	mNodeComponent->setPosition(mTargetPosition + mNodeComponent->getOrientation() * (Vector3(-dist, 0, 0) + mTargetOffset));
 }
 
-void OrbitCameraController::setTarget(Entity* target)
-{
-	CameraController::setTarget(target);
-}
+} // namespace skybolt::sim

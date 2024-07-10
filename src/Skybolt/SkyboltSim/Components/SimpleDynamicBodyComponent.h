@@ -14,17 +14,11 @@ namespace sim {
 class SimpleDynamicBodyComponent : public DynamicBodyComponent
 {
 public:
-	SimpleDynamicBodyComponent(Node* node, Real mass, const Vector3& momentofInertia);
-	void setLinearVelocity(const Vector3& v) override { mLinearVelocity = v; }
-	Vector3 getLinearVelocity() const override  { return mLinearVelocity; }
+	SimpleDynamicBodyComponent(Node* node, Motion* motion, double mass, const Vector3& momentofInertia);
 
-	//! Angular velocity is in world space
-	void setAngularVelocity(const Vector3& v) override { mAngularVelocity = v; }
-	Vector3 getAngularVelocity() const override  { return mAngularVelocity; }
+	double getMass() const override  { return mMass; }
 
-	Real getMass() const override  { return mMass; }
-
-	void setMass(Real mass) override { mMass = mass; }
+	void setMass(double mass) override { mMass = mass; }
 	void setCenterOfMass(const Vector3& relPosition) override { mCenterOfMass = relPosition; }
 
 	//! Apply force at center of mass. Force is in world axes.
@@ -36,8 +30,6 @@ public:
 	//! Apply torque. Torque is in world axes.
 	void applyTorque(const Vector3& torque) override;
 
-	void updateDynamicsSubstep(TimeReal dtSubstep) override;
-
 	virtual void setCollisionsEnabled(bool enabled) override {}
 
 	std::vector<std::type_index> getExposedTypes() const override
@@ -45,20 +37,31 @@ public:
 		return {typeid(DynamicBodyComponent), typeid(SimpleDynamicBodyComponent)};
 	}
 
+public: // SimUpdatable interface
+	void advanceSimTime(SecondsD newTime, SecondsD dt) override;
+
+	SKYBOLT_BEGIN_REGISTER_UPDATE_HANDLERS
+		SKYBOLT_REGISTER_UPDATE_HANDLER(UpdateStage::DynamicsSubStep, integrateTimeStep)
+	SKYBOLT_END_REGISTER_UPDATE_HANDLERS
+
+	void integrateTimeStep();
+
 private:
 	Node* mNode;
-	Real mMass;
+	Motion* mMotion;
+	double mMass;
 	Vector3 mMomentOfInertia;
 	Vector3 mCenterOfMass = math::dvec3Zero();
 
-	Vector3 mLinearVelocity = math::dvec3Zero(); //!< World space
-	Vector3 mAngularVelocity = math::dvec3Zero(); //!< World space
+	SecondsD mElapsedDt;
 
 	Vector3 mTotalForce = math::dvec3Zero(); //!< World space
 	Vector3 mTotalTorque = math::dvec3Zero(); //!< World space
 
 	std::vector<AppliedForce> mCurrentForces; //!< For visualization purposes. Used to populate mForces in base class.
 };
+
+SKYBOLT_REFLECT_EXTERN(SimpleDynamicBodyComponent);
 
 } // namespace sim
 } // namespace skybolt

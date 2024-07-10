@@ -21,15 +21,17 @@ public:
 	// SimVisBinding interface
 	void syncVis(const GeocentricToNedConverter& converter) override;
 
-	void setVisibilityPredicate(VisibilityPredicate predicate) override
+	void setEntityVisibilityPredicate(EntityVisibilityPredicate predicate) override
 	{
-		mVisibilityPredicate = predicate;
+		mEntityVisibilityPredicate = predicate;
 	}
 
 private:
 	sim::World* mWorld;
 	vis::ArrowsPtr mArrows;
-	VisibilityPredicate mVisibilityPredicate;
+	EntityVisibilityPredicate mEntityVisibilityPredicate;
 };
+
+std::shared_ptr<ForcesVisBinding> createForcesVisBinding(sim::World* world, const vis::ScenePtr& scene, const vis::ShaderPrograms& programs);
 
 } // namespace skybolt

@@ -30,15 +30,8 @@ struct AppliedForce
 class DynamicBodyComponent : public Component
 {
 public:
-	virtual void setLinearVelocity(const Vector3& v) = 0;
-	virtual Vector3 getLinearVelocity() const = 0;
-	
-	//! Angular velocity is in world space
-	virtual void setAngularVelocity(const Vector3& v) = 0;
-	virtual Vector3 getAngularVelocity() const = 0;
-
-	virtual void setMass(Real mass) = 0;
-	virtual Real getMass() const = 0;
+	virtual void setMass(double mass) = 0;
+	virtual double getMass() const = 0;
 
 	//! relPosition is in body axes
 	virtual void setCenterOfMass(const Vector3& relPosition) = 0;
@@ -62,6 +55,8 @@ public:
 protected:
 	std::vector<AppliedForce> mForces;
 };
+
+SKYBOLT_REFLECT_EXTERN(DynamicBodyComponent)
 
 } // namespace sim
 } // namespace skybolt

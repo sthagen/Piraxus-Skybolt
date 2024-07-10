@@ -10,9 +10,7 @@
 #include "EntityFactory.h"
 #include "Scenario/Scenario.h"
 #include "Plugin/Plugin.h"
-#include <SkyboltSim/Components/NameComponent.h>
-#include <SkyboltSim/System/SystemRegistry.h>
-#include <SkyboltVis/Scene.h>
+#include <SkyboltReflection/SkyboltReflectionFwd.h>
 #include <SkyboltVis/Shader/ShaderProgramRegistry.h>
 #include <SkyboltVis/Renderable/Planet/Tile/TileSource/JsonTileSourceFactory.h>
 #include <SkyboltCommon/File/FileUtility.h>
@@ -26,8 +24,8 @@ typedef std::function<PluginPtr(const PluginConfig&)> PluginFactory;
 struct EngineRootConfig
 {
 	std::vector<PluginFactory> pluginFactories;
-	vis::JsonTileSourceFactoryRegistryConfig tileSourceFactoryRegistryConfig;
 	nlohmann::json engineSettings;
+	bool enableVis = true; //!< True if the visual subsystem is enabled
 };
 
 class EngineRoot
@@ -48,14 +46,12 @@ public:
 	vis::ShaderPrograms programs;
 	vis::ScenePtr scene;
 	file::FileLocator fileLocator;
-	JulianDateProvider julianDateProvider;
-	std::unique_ptr<sim::World> simWorld;
 	std::unique_ptr<EntityFactory> entityFactory;
-	sim::NamedObjectRegistryPtr namedObjectRegistry;
 	vis::JsonTileSourceFactoryRegistryPtr tileSourceFactoryRegistry;
 	EngineStats stats;
-	Scenario scenario;
+	std::unique_ptr<Scenario> scenario;
 	sim::SystemRegistryPtr systemRegistry;
+	std::unique_ptr<refl::TypeRegistry> typeRegistry;
 	nlohmann::json engineSettings;
 };
 

@@ -29,18 +29,22 @@ public:
 	bool render();
 
 	osgViewer::ViewerBase& getViewer() const;
-	std::weak_ptr<osgViewer::ViewerBase> getViewerPtr() const;
 
 	void addWindow(const WindowPtr& window);
 	void removeWindow(const WindowPtr& window);
 
+	const std::vector<WindowPtr>& getWindows() const { return mWindows; }
+
 	//! Default is LoadTimingPolicy::LoadAcrossMultipleFrames
 	void setLoadTimingPolicy(LoadTimingPolicy loadTimingPolicy) { mLoadTimingPolicy = loadTimingPolicy; }
+
+	const DisplaySettings& getDisplaySettings() const { return mDisplaySettings; }
 
 protected:
 	std::shared_ptr<osgViewer::CompositeViewer> mViewer;
 
 private:
+	const DisplaySettings mDisplaySettings;
 	std::vector<WindowPtr> mWindows;
 	LoadTimingPolicy mLoadTimingPolicy;
 };

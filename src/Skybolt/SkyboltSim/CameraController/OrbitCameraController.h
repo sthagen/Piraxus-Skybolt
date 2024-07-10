@@ -11,28 +11,29 @@
 #include "Pitchable.h"
 #include "Yawable.h"
 #include "Zoomable.h"
+#include "Targetable.h"
 
 #include <optional>
 
 namespace skybolt {
 namespace sim {
 
-class OrbitCameraController : public CameraController, public Pitchable, public Yawable, public Zoomable
+class OrbitCameraController : public CameraController, public Pitchable, public Targetable, public Yawable, public Zoomable
 {
 public:
 	struct Params
 	{
-		Params(Real _minDist, Real _maxDist, Real _fovY, Real _zoomRate = 0.5f) :
+		Params(double _minDist, double _maxDist, double _fovY, double _zoomRate = 0.5f) :
 			minDist(_minDist), maxDist(_maxDist), fovY(_fovY), zoomRate(_zoomRate) {}
 
-		Real minDist;
-		Real maxDist;
-		float fovY;
-		float zoomRate;
+		double minDist;
+		double maxDist;
+		double fovY;
+		double zoomRate;
 		Vector3 orientationLagTimeConstant = Vector3(0);
 	};
 
-	OrbitCameraController(Entity* camera, const Params& params);
+	OrbitCameraController(Entity* camera, World* world, const Params& params);
 
 	void setTargetOffset(const Vector3& offset) { mTargetOffset = offset; }
 	void setLagTimeConstant(float constant) { mLagTimeConstant = constant; }
@@ -40,10 +41,9 @@ public:
 public:
 	// CameraController interface
 	void setActive(bool active) override;
-	void updatePostDynamicsSubstep(TimeReal dtSubstep) override;
-	void update(float dt) override;
+	void updatePostDynamicsSubstep(SecondsD dtSubstep) override;
+	void update(SecondsD dt) override;
 	void setInput(const Input& input) override { mInput = input; }
-	void setTarget(Entity* target) override;
 
 private:
 	void resetFiltering();
@@ -53,7 +53,7 @@ private:
 	Vector3 mTargetPosition;
 	std::optional<Quaternion> mSmoothedTargetOrientation;
 	Vector3 mFilteredPlanetUp;
-	const Entity* mPrevTarget;
+	EntityId mPrevTargetId = nullEntityId();
 	Input mInput = Input::zero();
 	float mLagTimeConstant = 0;
 
@@ -62,6 +62,8 @@ private:
 	static const float msZoomRate;
 	static const float msPlanetAlignTransitionRate;
 };
+
+SKYBOLT_REFLECT_EXTERN(OrbitCameraController)
 
 } // namespace sim
 } // namespace skybolt
