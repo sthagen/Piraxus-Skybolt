@@ -1,4 +1,4 @@
-/* Copyright 2012-2020 Matthew Reid
+/* Copyright Matthew Reid
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -25,7 +25,7 @@ std::shared_ptr<InterpolatorD> createPositionComponentInterpolator(const std::sh
 	else
 	{
 		return std::make_shared<CubicBSplineInterpolatorD>(
-			[sequence, componentIndex] { return sequence->values.size(); },
+			[sequence, componentIndex] { return int(sequence->values.size()); },
 			[sequence, componentIndex](int i) { return sequence->values[i].position[componentIndex]; },
 			[sequence, componentIndex](int i) { return sequence->times[i]; });
 	}
@@ -41,7 +41,7 @@ std::shared_ptr<InterpolatorD> createOrientationComponentInterpolator(const std:
 	else
 	{
 		return std::make_shared<CubicBSplineInterpolatorD>(
-			[sequence, componentIndex] { return sequence->values.size(); },
+			[sequence, componentIndex] { return int(sequence->values.size()); },
 			[sequence, componentIndex](int i) { return sequence->values[i].orientation[componentIndex]; },
 			[sequence, componentIndex](int i) { return sequence->times[i]; });
 	}

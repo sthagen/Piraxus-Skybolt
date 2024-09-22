@@ -1,4 +1,4 @@
-/* Copyright 2012-2020 Matthew Reid
+/* Copyright Matthew Reid
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -126,7 +126,7 @@ static void setupTerrainStateSet(osg::StateSet& ss, const TerrainConfig& config)
 	if (auto uniformTechnique = dynamic_cast<const UniformDetailMappingTechnique*>(config.detailMappingTechnique.get()); uniformTechnique)
 	{
 		ss.setDefine("DETAIL_MAPPING_TECHNIQUE_UNIFORM");
-		ss.setDefine("DETAIL_SAMPLER_COUNT");
+		ss.setDefine("DETAIL_SAMPLER_COUNT", "1");
 		
 		ss.setTextureAttributeAndModes(unit, uniformTechnique->albedoDetailMap);
 		ss.addUniform(createUniformSampler2d("albedoDetailSamplers", unit++));

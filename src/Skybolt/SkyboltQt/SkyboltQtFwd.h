@@ -1,4 +1,4 @@
-/* Copyright 2012-2020 Matthew Reid
+/* Copyright Matthew Reid
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -14,6 +14,7 @@ class EntityObject;
 class JsonScenarioSerializable;
 class OsgWindow;
 class OsgWindow;
+struct PickedScenarioObject;
 class PropertyEditor;
 class PropertiesModel;
 struct QtProperty;

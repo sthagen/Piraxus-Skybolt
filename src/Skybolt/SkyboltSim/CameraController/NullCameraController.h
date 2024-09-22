@@ -1,4 +1,4 @@
-/* Copyright 2012-2020 Matthew Reid
+/* Copyright Matthew Reid
  *
  * This Source Code Form is subject to the terms of the Mozilla Public
  * License, v. 2.0. If a copy of the MPL was not distributed with this
@@ -21,7 +21,7 @@ public:
 SKYBOLT_REFLECT_BEGIN(NullCameraController)
 {
 	registry.type<NullCameraController>("NullCameraController")
-		.superType<NullCameraController>();
+		.superType<CameraController>();
 }
 SKYBOLT_REFLECT_END
 
