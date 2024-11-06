@@ -7,11 +7,13 @@
 #include <SkyboltQt/MainWindow.h>
 #include <SkyboltQt/ContextAction/CreateContextActions.h>
 #include <SkyboltQt/Engine/EngineSettingsSerialization.h>
+#include <SkyboltQt/Engine/FindPython.h>
 #include <SkyboltQt/Engine/SimUpdater.h>
 #include <SkyboltQt/Input/ViewportInputSystem.h>
 #include <SkyboltQt/Input/InputPlatformQt.h>
 #include <SkyboltQt/Property/DefaultPropertyModelFactories.h>
 #include <SkyboltQt/QtUtil/ApplicationUtil.h>
+#include <SkyboltQt/QtUtil/QtLayoutUtil.h>
 #include <SkyboltQt/QtUtil/QtMenuUtil.h>
 #include <SkyboltQt/QtUtil/QtTimerUtil.h>
 #include "SkyboltQt/Scenario/EntityObjectType.h"
@@ -19,23 +21,29 @@
 #include <SkyboltQt/Scenario/ScenarioSelectionModel.h>
 #include "SkyboltQt/Scenario/ScenarioWorkspace.h"
 #include <SkyboltQt/Style/DarkStyle.h>
+#include <SkyboltQt/ThirdParty/DarkTitleBar.h>
 #include <SkyboltQt/Viewport/DefaultViewportMouseEventHandler.h>
 #include <SkyboltQt/Viewport/ScenarioObjectPicker.h>
 #include <SkyboltQt/Viewport/ViewportVisibilityFiltering.h>
 #include <SkyboltQt/Viewport/VisSelectionIcons.h>
 #include <SkyboltQt/Widgets/EngineSystemsWidget.h>
 #include <SkyboltQt/Widgets/EntityControllerWidget.h>
+#include <SkyboltQt/Widgets/ErrorLogModel.h>
 #include <SkyboltQt/Widgets/ScenarioPropertyEditorWidget.h>
 #include <SkyboltQt/Widgets/ScenarioObjectsEditorWidget.h>
+#include <SkyboltQt/Widgets/StatusBar.h>
 #include <SkyboltQt/Widgets/TimelineControlWidget.h>
 #include <SkyboltQt/Widgets/TimeControlWidget.h>
+#include <SkyboltQt/Widgets/ViewportToolBar.h>
 #include <SkyboltQt/Widgets/ViewportWidget.h>
 #include <SkyboltCommon/MapUtility.h>
-#include <SkyboltEngine/Diagnostics/StatsDisplaySystem.h>
+#include <SkyboltCommon/Stringify.h>
 #include <SkyboltEngine/EngineCommandLineParser.h>
 #include <SkyboltEngine/EngineRootFactory.h>
 #include <SkyboltEngine/EngineSettings.h>
 #include <SkyboltEngine/GetExecutablePath.h>
+#include <SkyboltEngine/Diagnostics/StatsDisplaySystem.h>
+#include <SkyboltCommon/Logging/ConsoleSink.h>
 #include <SkyboltEngine/Input/InputSystem.h>
 #include <SkyboltEngine/SimVisBinding/ForcesVisBinding.h>
 #include <SkyboltEngine/SimVisBinding/SimVisSystem.h>
@@ -53,7 +61,9 @@
 #include <QDialog>
 #include <QMenu>
 #include <QMenuBar>
+#include <QMessageBox>
 #include <QPushButton>
+#include <QSplashScreen>
 #include <QVBoxLayout>
 
 using namespace skybolt;
@@ -71,22 +81,71 @@ static EntityVisibilityPredicateSetter toEntityVisibilityPredicateSetter(EntityV
 	return [filterable] (EntityVisibilityPredicate p) { filterable->setEntityVisibilityPredicate(std::move(p)); };
 }
 
+static std::unique_ptr<QSplashScreen> createSplashScreen(const EngineRoot& engineRoot)
+{
+	std::optional<file::Path> splashFile = skybolt::valueOrLogError(engineRoot.fileLocator("Ui/Splash.jpg"));
+	QPixmap pixmap = splashFile ? QPixmap(QString::fromStdString(splashFile->string())) : QPixmap();
+	auto splash = std::make_unique<QSplashScreen>(pixmap);
+
+#ifdef SKYBOLT_VERSION
+	QString versionNumber = QString::fromUtf8(STRINGIFY(SKYBOLT_VERSION));
+#else
+	QString versionNumber = "???";
+#endif
+	auto versionLabel = new QLabel("Version " + versionNumber, splash.get());
+	QFont font = versionLabel->font();
+	font.setPointSizeF(15);
+	versionLabel->setFont(font);
+	versionLabel->move(pixmap.width() * (250.f / 1240.f), pixmap.height() * (470.f / 600.f));
+
+	return splash;
+}
+
+static void setSplashScreenMessage(QSplashScreen& screen, const QString& message)
+{
+	screen.showMessage(message, Qt::AlignBottom, Qt::white);
+}
+
 class Application : public QApplication
 {
 public:
 	Application(const std::vector<PluginFactory>& enginePluginFactories, int argc, char* argv[]) :
 		QApplication(argc, argv)
 	{
-		QCoreApplication::addLibraryPath(QCoreApplication::applicationDirPath() + "/qtplugins");
 		setStyle(new DarkStyle);
 
-		// Create Skybolt Engine
+		// Create model for logging application warnings and errors
+		auto errorLogModel = new ErrorLogModel(this);
+		connectToBoostLogger(errorLogModel);
+
+		// Create engine
 		{
 			QSettings settings(QApplication::applicationName());
 			nlohmann::json engineSettings = readOrCreateEngineSettingsFile(settings);
-			mEngineRoot = EngineRootFactory::create(enginePluginFactories, engineSettings);
-			mVisRoot = createVisRoot(*mEngineRoot);
+			EngineRootConfig config;
+			config.engineSettings = engineSettings;
+			mEngineRoot = std::make_unique<EngineRoot>(config);
 		}
+
+#ifdef PYTHON_VERSION_MAJOR
+		// Warn user if python is not available
+		if (!isPythonOnPath(PYTHON_VERSION_MAJOR, PYTHON_VERSION_MINOR))
+		{
+			BOOST_LOG_TRIVIAL(warning) << QString("Python %1.%2 not found in PATH environment variable. Python functionality will be disabled.")
+				.arg(PYTHON_VERSION_MAJOR).arg(PYTHON_VERSION_MINOR).toStdString();
+		}
+#endif
+
+		// Create splash screen
+		mSplashScreen = createSplashScreen(*mEngineRoot);
+		mSplashScreen->show();
+
+		// Load plugins
+		setSplashScreenMessage(*mSplashScreen, "Loading plugins...");
+		mEngineRoot->loadPlugins(enginePluginFactories);
+
+		// Create visualization
+		mVisRoot = createVisRoot(*mEngineRoot);
 
 		// Create user input system
 		std::shared_ptr<ViewportInputSystem> viewportInputSystem;
@@ -134,8 +193,12 @@ public:
 			c.engineRoot = mEngineRoot;
 			return c;
 		}()));
+		addErrorLogStatusBar(*mMainWindow->statusBar(), errorLogModel);
+		enableDarkTitleBar(mMainWindow->winId());
 
 		auto selectionModel = new ScenarioSelectionModel(mMainWindow.get());
+
+		setSplashScreenMessage(*mSplashScreen, "Initializing tool windows...");
 
 		// Create property editor
 		{
@@ -185,13 +248,21 @@ public:
 				c.selectionModel = selectionModel;
 				c.scenarioObjectPicker = createScenarioObjectPicker(*scenarioObjectTypes);
 				c.contextActions = createContextActions(*mEngineRoot);
-				c.scenarioFilenameGetter = [scenarioWorkspace] { return scenarioWorkspace->getScenarioFilename().toStdString(); };
 				c.parent = mMainWindow.get();
 				return c;
 			}());
 			viewportWidget->addMouseEventHandler(viewportMouseEventHandler);
 
-			EntityVisibilityPredicate basePredicate = createSelectedEntityVisibilityPredicateAndAddSubMenu(*viewportWidget->getVisibilityFilterMenu(), "See Through Planet", selectionModel);
+			auto viewportToolBar = new ViewportToolBar([&] {
+				ViewportToolBarConfig c;
+				c.engineRoot = mEngineRoot.get();
+				c.viewport = viewportWidget;
+				c.scenarioFilenameGetter = [scenarioWorkspace] { return scenarioWorkspace->getScenarioFilename().toStdString(); };
+				c.parent = mMainWindow.get();
+				return c;
+				}());
+
+			EntityVisibilityPredicate basePredicate = createSelectedEntityVisibilityPredicateAndAddSubMenu(*viewportToolBar->getVisibilityFilterMenu(), "See Through Planet", selectionModel);
 			basePredicate = predicateOr(basePredicate, createLineOfSightVisibilityPredicate(viewportWidget, &mEngineRoot->scenario->world));
 
 			auto visibilityLayers = std::map<std::string, EntityVisibilityPredicateSetter>({
@@ -199,16 +270,28 @@ public:
 				{"Forces", toEntityVisibilityPredicateSetter(mForcesVisBinding.get())}
 			});
 
-			addVisibilityLayerSubMenus(*viewportWidget->getVisibilityFilterMenu(), basePredicate, visibilityLayers, selectionModel);
+			addVisibilityLayerSubMenus(*viewportToolBar->getVisibilityFilterMenu(), basePredicate, visibilityLayers, selectionModel);
 
-			mMainWindow->addToolWindow("Viewport", viewportWidget);
+			auto viewportToolWidget = new QWidget(mMainWindow.get());
+			createBoxLayoutWithWidgets({ viewportToolBar, viewportWidget }, viewportToolWidget, QBoxLayout::Direction::TopToBottom);
+
+			mMainWindow->addToolWindow("Viewport", viewportToolWidget);
 			connectJsonScenarioSerializable(*scenarioWorkspace, viewportWidget);
 		}
 
 		// Create timeline widget
-		TimelineControlWidget* timeControlWidget;
+		auto requestedTimeRate = std::make_shared<ObservableValueD>(1.0);
+		auto actualTimeRate = std::make_shared<ObservableValueD>(1.0);
 		{
-			timeControlWidget = new TimelineControlWidget(&mEngineRoot->scenario->timeSource, &mEngineRoot->scenario->timelineMode, mMainWindow.get());
+			auto timeControlWidget = new TimelineControlWidget([&] {
+				TimelineControlWidgetConfig c;
+				c.timeSource = &mEngineRoot->scenario->timeSource;
+				c.timelineMode = &mEngineRoot->scenario->timelineMode;
+				c.requestedTimeRate = requestedTimeRate.get();
+				c.actualTimeRate = actualTimeRate.get();
+				c.parent = mMainWindow.get();
+				return c;
+				}());
 			mMainWindow->addToolWindow("Time Control", timeControlWidget);
 		}
 
@@ -237,11 +320,11 @@ public:
 		// Begin update timer
 		mSimUpdater = std::make_unique<SimUpdater>(mEngineRoot);
 
-		createAndStartIntervalDtTimer(10, mMainWindow.get(), [this, timeControlWidget, viewportWidget] (sim::SecondsD wallDt) {
-			mSimUpdater->setRequestedTimeRate(timeControlWidget->getTimeControlWidget()->getRequestedTimeRate());
+		createAndStartIntervalDtTimer(10, mMainWindow.get(), [this, requestedTimeRate, actualTimeRate, viewportWidget] (sim::SecondsD wallDt) {
+			mSimUpdater->setRequestedTimeRate(requestedTimeRate->get());
 			mSimUpdater->update(wallDt);
 			
-			timeControlWidget->getTimeControlWidget()->setActualTimeRate(mSimUpdater->getActualTimeRate());
+			actualTimeRate->set(mSimUpdater->getActualTimeRate());
 			viewportWidget->update();
 
 			if (mShaderSourceFileChangeMonitor)
@@ -261,6 +344,8 @@ public:
 		{
 			if (argc >= 2)
 			{
+				setSplashScreenMessage(*mSplashScreen, "Loading scenario...");
+
 				QString filename(argv[1]);
 				mMainWindow->openScenario(filename, MainWindow::OverwriteMode::OverwriteWithoutPrompt);
 			}
@@ -270,6 +355,8 @@ public:
 			mMainWindow.reset();
 			throw;
 		}
+
+		mSplashScreen->finish(mMainWindow.get());
 
 		mMainWindow->showMaximized();
 	}
@@ -368,7 +455,7 @@ protected:
 
 		auto closeButton = new QPushButton("Close", &dialog);
 		layout.addWidget(closeButton);
-		QObject::connect(closeButton, &QPushButton::pressed, &dialog, &QDialog::accept);
+		QObject::connect(closeButton, &QPushButton::clicked, &dialog, &QDialog::accept);
 
 		dialog.exec();
 	}
@@ -378,6 +465,7 @@ private:
 	std::unique_ptr<SimUpdater> mSimUpdater;
 	std::unique_ptr<MainWindow> mMainWindow;
 	std::shared_ptr<EngineRoot> mEngineRoot;
+	std::unique_ptr<QSplashScreen> mSplashScreen;
 	vis::WindowPtr mWindow;
 	osg::ref_ptr<skybolt::vis::RenderCameraViewport> mViewport;
 	std::shared_ptr<skybolt::StatsDisplaySystem> mStatsDisplaySystem;
@@ -392,20 +480,44 @@ int main(int argc, char *argv[])
 {
 	try
 	{
+		file::Path executableDir = getExecutablePath();
+
 		QCoreApplication::setAttribute(Qt::AA_ShareOpenGLContexts);
 		QCoreApplication::setApplicationName("SkyboltQt");
+		QCoreApplication::addLibraryPath(QString::fromStdString((executableDir / "qtPlugins").string()));
 
-		std::string pluginsDir = (getExecutablePath() / "plugins").string();
+		addConsoleLogSink();
+
+		std::string pluginsDir = (executableDir / "plugins").string();
 		std::vector<PluginFactory> enginePluginFactories = loadPluginFactories<Plugin, PluginConfig>(getAllPluginFilepathsInDirectory(pluginsDir));
-		Application application(enginePluginFactories, argc, argv);
 
-		if (!applicationSupportsOpenGl())
+		try
 		{
-			displayApplicationError("This program requires OpenGL to run.");
-			return 1;
-		}
+			Application application(enginePluginFactories, argc, argv);
 
-		return application.exec();
+			if (!applicationSupportsOpenGl())
+			{
+				displayApplicationError("This program requires OpenGL to run.");
+				return 1;
+			}
+
+			try
+			{
+				return application.exec();
+			}
+			catch (const std::exception &e)
+			{
+				// Copy and re-throw exception, as the original exception won't exist anymore if python thew an exception,
+				// since application will be destroyed
+				throw Exception(e.what());
+			}
+		}
+		catch (const std::exception &e)
+		{
+			// Copy and re-throw exception, as the original exception won't exist anymore if plugin thew an exception,
+			// since enginePluginFactories will be destroyed
+			throw Exception(e.what());
+		}
 	}
 	catch (const std::exception &e)
 	{
@@ -416,5 +528,5 @@ int main(int argc, char *argv[])
 		displayApplicationError("Exception caught in main");
 	}
 
-	return 0; 
+	return EXIT_FAILURE; 
 }

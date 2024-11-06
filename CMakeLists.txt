@@ -1,12 +1,6 @@
-cmake_minimum_required (VERSION 3.13.0)
-cmake_policy(SET CMP0020 NEW)
-cmake_policy(SET CMP0074 NEW) # allow <PackageName>_ROOT variables
-if(${CMAKE_VERSION} VERSION_GREATER_EQUAL "3.19.0") 
-	cmake_policy(SET CMP0111 OLD) # suppress pybind11 missing imports warnings
-endif()
+cmake_minimum_required (VERSION 3.26.0)
 
 project(Skybolt)
-set(PACKAGE_VERSION 1.3.1)
 
 enable_testing()
 
@@ -64,6 +58,10 @@ else()
 	set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -Wno-register") # disable warnings about use of 'register' in glm
 endif()
 
+if(Skybolt_VERSION)
+	add_definitions(-DSKYBOLT_VERSION=${Skybolt_VERSION})
+endif()
+
 #-------------------------------------------------------------
 # Dependency options
 #-------------------------------------------------------------
@@ -85,8 +83,8 @@ include(SetPluginTargetProperties)
 include(Catch)
 include(SkyboltInstall)
 
-add_subdirectory (src/Skybolt)
-add_subdirectory (src/SkyboltExamples)
+add_subdirectory(src/Skybolt)
+add_subdirectory(src/SkyboltExamples)
 
 #-------------------------------------------------------------
 # Installation
@@ -97,6 +95,9 @@ if (EXISTS ${CMAKE_SOURCE_DIR}/conanfile.py) # File might not exist if during co
 endif()
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/Conan	DESTINATION .)
 
+# Install CMake scripts
+install(DIRECTORY ${CMAKE_SOURCE_DIR}/CMake	DESTINATION .)
+
 # Install headers
 install(
 	DIRECTORY ${CMAKE_SOURCE_DIR}/src/Skybolt
@@ -105,22 +106,15 @@ install(
 	PATTERN "*.h*"
 )
 
-# Install cmake config files
-include(CMakePackageConfigHelpers)
-write_basic_package_version_file(
-    SkyboltConfigVersion.cmake
-    VERSION ${PACKAGE_VERSION}
-    COMPATIBILITY AnyNewerVersion
-)
-
-install(
-	EXPORT SkyboltTargets
-	NAMESPACE Skybolt::
-    DESTINATION cmake
-)
-
-configure_file(CMake/SkyboltConfig.cmake.in SkyboltConfig.cmake @ONLY)
-install(FILES "${CMAKE_CURRENT_BINARY_DIR}/SkyboltConfig.cmake"
-              "${CMAKE_CURRENT_BINARY_DIR}/SkyboltConfigVersion.cmake"
-	DESTINATION cmake
+# Install runtime dependencies
+install(RUNTIME_DEPENDENCY_SET SkyboltDependencies
+	PRE_EXCLUDE_REGEXES
+		[=[api-ms-]=] # VC Redistibutable DLLs
+		[=[ext-ms-]=] # Windows extension DLLs
+		[[kernel32\.dll]]
+		[[libc\.so\..*]] [[libgcc_s\.so\..*]] [[libm\.so\..*]] [[libstdc\+\+\.so\..*]]
+	POST_EXCLUDE_REGEXES
+		[=[.*system32\/.*\.dll]=] # Windows system DLLs
+		[=[^\/(lib|usr\/lib|usr\/local\/lib)]=] # Unix system libraries
+	DIRECTORIES ${CONAN_RUNTIME_LIB_DIRS}
 )

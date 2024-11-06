@@ -22,6 +22,7 @@ public:
 	CameraControllerWidget(skybolt::sim::World* world, QWidget* parent = nullptr);
 	~CameraControllerWidget();
 
+	skybolt::sim::Entity* getCamera() const { return mCamera; }
 	void setCamera(skybolt::sim::Entity* camera);
 
 	void update();
@@ -39,4 +40,5 @@ private:
 	QComboBox* mCameraTargetCombo;
 	EntityListModel* mTargetListModel;
 	std::vector<boost::signals2::scoped_connection> mControllerConnections;
+	bool mRemovedCurrentItem = false;
 };

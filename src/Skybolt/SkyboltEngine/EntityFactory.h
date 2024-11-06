@@ -8,6 +8,7 @@
 
 #include "ComponentFactory.h"
 #include "SkyboltEngineFwd.h"
+#include "SkyboltEngine/Scenario/ScenarioObjectPath.h"
 #include <SkyboltSim/EntityId.h>
 #include <SkyboltSim/SimMath.h>
 #include <SkyboltVis/VisFactory.h>
@@ -19,6 +20,7 @@
 
 #include <functional>
 #include <map>
+#include <optional>
 #include <vector>
 
 namespace skybolt {
@@ -52,10 +54,16 @@ public:
 	EntityFactory(const Context& context, const std::vector<std::filesystem::path>& entityFilenames);
 
 	sim::EntityPtr createEntity(const std::string& templateName, const std::string& instanceName = "", const sim::Vector3& position = math::dvec3Zero(), const sim::Quaternion& orientation = math::dquatIdentity(), sim::EntityId id = sim::nullEntityId()) const;
-	sim::EntityPtr createEntityFromJson(const nlohmann::json& json, const std::string& instanceName, const sim::Vector3& position, const sim::Quaternion& orientation, sim::EntityId id = sim::nullEntityId()) const;
+	sim::EntityPtr createEntityFromJson(const nlohmann::json& json, const std::string& templateName, const std::string& instanceName, const sim::Vector3& position, const sim::Quaternion& orientation, sim::EntityId id = sim::nullEntityId()) const;
 
 	typedef std::vector<std::string> Strings;
-	Strings getTemplateNames() const {return mTemplateNames;}
+	Strings getTemplateNames() const { return mTemplateNames; }
+
+	 //!< Gets the default scenario object directory for objects created from the given template
+	const skybolt::ScenarioObjectPath& getScenarioObjectDirectoryForTemplate(const std::string& templateName) const;
+
+	typedef std::map<std::string, nlohmann::json> TemplateJsonMap;
+	const TemplateJsonMap& getTemplateJsonMap() const { return mTemplateJsonMap; }
 
 	std::string createUniqueObjectName(const std::string& baseName) const;
 
@@ -68,13 +76,15 @@ private:
 
 private:
 	Strings mTemplateNames;
+	std::map<std::string, skybolt::ScenarioObjectPath> mTemplateDirectories;
 	std::map<std::string, std::function<sim::EntityPtr()>> mBuiltinTemplates; // TODO: genericize these
 
-	typedef std::map<std::string, nlohmann::json> TemplateJsonMap;
 	TemplateJsonMap mTemplateJsonMap;
 
 	Context mContext;
 	mutable sim::EntityId mNextEntityId{1,0};
 };
+
+const ScenarioObjectPath& getDefaultEntityScenarioObjectDirectory();
 
 } // namespace skybolt

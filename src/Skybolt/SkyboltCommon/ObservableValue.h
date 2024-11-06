@@ -20,19 +20,36 @@ public:
 
 	void set(const T& value)
 	{
-		T oldValue = mValue;
-		mValue = value;
-		valueChanged(oldValue, mValue);
+		if (mValue != value)
+		{
+			T oldValue = mValue;
+			mValue = value;
+			valueChanged(oldValue, mValue);
+		}
 	}
 
 	const T& operator() () const { return mValue; }
 
 	void operator= (const T& newValue) { set(newValue); }
 
-	boost::signals2::signal<void(const T& oldValue, const T& newValue)> valueChanged;
+	using ValueChangedSignal = boost::signals2::signal<void(const T& oldValue, const T& newValue)>;
+	mutable ValueChangedSignal valueChanged;
 
 private:
 	T mValue;
 };
+
+template <typename T>
+boost::signals2::scoped_connection connectObservableValue(ObservableValue<T>* source, typename ObservableValue<T>::ValueChangedSignal::slot_function_type fn)
+{
+	boost::signals2::scoped_connection connection;
+	if (source)
+	{
+		return source->valueChanged.connect(std::move(fn));
+	}
+	return connection;
+}
+
+using ObservableValueD = ObservableValue<double>;
 
 } // namespace skybolt

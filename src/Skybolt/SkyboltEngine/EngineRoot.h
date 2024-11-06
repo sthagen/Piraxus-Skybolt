@@ -8,9 +8,11 @@
 
 #include "EngineStats.h"
 #include "EntityFactory.h"
+#include "FactoryRegistries.h"
 #include "Scenario/Scenario.h"
 #include "Plugin/Plugin.h"
 #include <SkyboltReflection/SkyboltReflectionFwd.h>
+#include <SkyboltSim/System/SystemRegistry.h>
 #include <SkyboltVis/Shader/ShaderProgramRegistry.h>
 #include <SkyboltVis/Renderable/Planet/Tile/TileSource/JsonTileSourceFactory.h>
 #include <SkyboltCommon/File/FileUtility.h>
@@ -23,7 +25,6 @@ typedef std::function<PluginPtr(const PluginConfig&)> PluginFactory;
 
 struct EngineRootConfig
 {
-	std::vector<PluginFactory> pluginFactories;
 	nlohmann::json engineSettings;
 	bool enableVis = true; //!< True if the visual subsystem is enabled
 };
@@ -40,6 +41,8 @@ public:
 	EngineRoot(const EngineRootConfig& config);
 	~EngineRoot();
 
+	void loadPlugins(const std::vector<PluginFactory>& pluginFactories);
+
 	const std::vector<std::string>& getAssetPackagePaths() const { return mAssetPackagePaths; }
 
 	std::unique_ptr<px_sched::Scheduler> scheduler;
@@ -52,10 +55,11 @@ public:
 	std::unique_ptr<Scenario> scenario;
 	sim::SystemRegistryPtr systemRegistry;
 	std::unique_ptr<refl::TypeRegistry> typeRegistry;
+	std::unique_ptr<FactoryRegistries> factoryRegistries;
 	nlohmann::json engineSettings;
 };
 
-file::Path locateFile(const std::string& filename, file::FileLocatorMode mode);
+Expected<file::Path> locateFile(const std::string& filename);
 file::Paths getPathsInAssetPackages(const std::vector<std::string>& assetPackagePaths, const std::string& relativePath);
 file::Paths getFilesWithExtensionInDirectoryInAssetPackages(const std::vector<std::string>& assetPackagePaths, const std::string& relativeDirectory, const std::string& extension);
 

@@ -25,8 +25,6 @@
 #include <SkyboltSim/JsonHelpers.h>
 #include <SkyboltSim/World.h>
 #include <SkyboltSim/WorldUtil.h>
-#include <SkyboltSim/Components/DynamicBodyComponent.h>
-#include <SkyboltSim/Components/CameraComponent.h>
 #include <SkyboltSim/Components/CloudComponent.h>
 #include <SkyboltSim/Components/MainRotorComponent.h>
 #include <SkyboltSim/Components/NameComponent.h>
@@ -554,7 +552,7 @@ static void loadVisualPlanet(Entity* entity, const EntityFactory::Context& conte
 			config.featureTilesDirectoryRelAssetPackage = directory;
 
 			std::string buildingTypesFilename = it.value().at("buildingTypesFilename");
-			buildingTypesFilename = context.fileLocator(buildingTypesFilename, file::FileLocatorMode::Required).string();
+			buildingTypesFilename = skybolt::valueOrThrowException(context.fileLocator(buildingTypesFilename)).string();
 			config.buildingTypes = vis::createBuildingTypesFromJson(readJsonFile(buildingTypesFilename));
 		}
 	}
@@ -590,19 +588,26 @@ static void loadVisualPlanet(Entity* entity, const EntityFactory::Context& conte
 
 using VisComponentLoader = std::function<void(Entity*, const EntityFactory::Context&, const EntityFactory::VisContext&, VisObjectsComponentPtr&, const SimVisBindingsComponentPtr&, const nlohmann::json&)>;
 
+const ScenarioObjectPath& skybolt::getDefaultEntityScenarioObjectDirectory()
+{
+	static ScenarioObjectPath d = {"Platforms"};
+	return d;
+}
+
 static std::shared_ptr<ScenarioMetadataComponent> createDefaultEntityScenarioMetadataComponent()
 {
 	auto component = std::make_shared<ScenarioMetadataComponent>();
-	component->directory = {"Entity"};
+	component->directory = getDefaultEntityScenarioObjectDirectory();
 	return component;
 }
 
-EntityPtr EntityFactory::createEntityFromJson(const nlohmann::json& json, const std::string& instanceName, const Vector3& position, const Quaternion& orientation, EntityId id) const
+EntityPtr EntityFactory::createEntityFromJson(const nlohmann::json& json, const std::string& templateName, const std::string& instanceName, const Vector3& position, const Quaternion& orientation, EntityId id) const
 {
 	EntityPtr entity = std::make_shared<sim::Entity>((id != nullEntityId()) ? id : generateNextEntityId());
 
 	// Create required components
 	entity->addComponent(std::make_shared<NameComponent>(instanceName));
+	entity->addComponent(std::make_shared<TemplateNameComponent>(templateName));
 
 	VisObjectsComponentPtr visObjectsComponent;
 	SimVisBindingsComponentPtr simVisBindingComponent;
@@ -685,6 +690,24 @@ EntityPtr EntityFactory::createEntityFromJson(const nlohmann::json& json, const 
 	return entity;
 }
 
+static ScenarioObjectPath readScenarioObjectDirectory(const nlohmann::json& json)
+{
+	ScenarioObjectPath result;
+	ifChildExists(json, "components", [&](const nlohmann::json& components) {
+		for (const auto& component : components)
+		{
+			ifChildExists(component, "scenarioMetadata", [&] (const nlohmann::json& c) {
+				result = parseStringList(c.at("scenarioObjectDirectory").get<std::string>(), "/");
+			});
+		}
+	});
+	if (result.empty())
+	{
+		return getDefaultEntityScenarioObjectDirectory();
+	}
+	return result;
+}
+
 EntityFactory::EntityFactory(const EntityFactory::Context& context, const std::vector<std::filesystem::path>& entityFilenames) :
 	mContext(context)
 {
@@ -707,8 +730,10 @@ EntityFactory::EntityFactory(const EntityFactory::Context& context, const std::v
 	for (const std::filesystem::path& filename : entityFilenames)
 	{
 		std::string name = filename.stem().string();
-		mTemplateJsonMap[name] = readJsonFile(filename.string());
+		nlohmann::json json = readJsonFile(filename.string());
+		mTemplateJsonMap[name] = json;
 		mTemplateNames.push_back(name);
+		mTemplateDirectories[name] = readScenarioObjectDirectory(json);
 	}
 }
 
@@ -718,12 +743,10 @@ EntityPtr EntityFactory::createEntity(const std::string& templateName, const std
 		auto i = mTemplateJsonMap.find(templateName);
 		if (i != mTemplateJsonMap.end())
 		{
-			std::string name = nameIn.empty() ? createUniqueObjectName(templateName) : nameIn;
+			std::string instanceName = nameIn.empty() ? createUniqueObjectName(templateName) : nameIn;
 			try
 			{
-				EntityPtr entity = createEntityFromJson(i->second, name, position, orientation, id);
-				entity->addComponent(ComponentPtr(new TemplateNameComponent(templateName)));
-				return entity;
+				return createEntityFromJson(i->second, templateName, instanceName, position, orientation, id);
 			}
 			catch (const std::exception& e)
 			{
@@ -851,6 +874,15 @@ EntityPtr EntityFactory::createStars(const EntityFactory::VisContext& visContext
 	object->addComponent(visObjectsComponent);
 
 	return object;
+}
+
+const skybolt::ScenarioObjectPath& EntityFactory::getScenarioObjectDirectoryForTemplate(const std::string& templateName) const
+{
+	if (auto i = mTemplateDirectories.find(templateName); i != mTemplateDirectories.end())
+	{
+		return i->second;
+	}
+	return getDefaultEntityScenarioObjectDirectory();
 }
 
 std::string EntityFactory::createUniqueObjectName(const std::string& baseName) const
