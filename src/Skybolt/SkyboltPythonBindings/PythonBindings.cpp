@@ -5,16 +5,21 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #include "PyComponent.h"
+#include "PyComponentProperty.h"
 #include "PythonBindings.h"
 
+#include <SkyboltCommon/Json/JsonHelpers.h>
 #include <SkyboltCommon/Math/Box3.h>
+#include <SkyboltEngine/EntityFactory.h>
 #include <SkyboltEngine/EngineRoot.h>
 #include <SkyboltEngine/EngineRootFactory.h>
-#include <SkyboltEngine/EntityFactory.h>
+#include <SkyboltEngine/EngineSettings.h>
 #include <SkyboltEngine/WindowUtil.h>
 #include <SkyboltEngine/Components/TemplateNameComponent.h>
 #include <SkyboltEngine/Components/VisObjectsComponent.h>
+#include <SkyboltEngine/Plugin/PluginHelpers.h>
 #include <SkyboltEngine/Scenario/ScenarioMetadataComponent.h>
+#include <SkyboltEngine/Scenario/ScenarioSerialization.h>
 #include <SkyboltEngine/SimVisBinding/CameraSimVisBinding.h>
 #include <SkyboltEngine/SimVisBinding/SimVisSystem.h>
 #include <SkyboltSim/Entity.h>
@@ -22,11 +27,13 @@
 #include <SkyboltSim/CameraController/CameraController.h>
 #include <SkyboltSim/CameraController/CameraControllerSelector.h>
 #include <SkyboltSim/CameraController/EntityTargeter.h>
+#include <SkyboltSim/Components/AttacherComponent.h>
 #include <SkyboltSim/Components/CameraComponent.h>
 #include <SkyboltSim/Components/CameraControllerComponent.h>
 #include <SkyboltSim/Components/MainRotorComponent.h>
 #include <SkyboltSim/Components/NameComponent.h>
 #include <SkyboltSim/Spatial/Frustum.h>
+#include <SkyboltSim/Spatial/Geocentric.h>
 #include <SkyboltSim/Spatial/GreatCircle.h>
 #include <SkyboltSim/Spatial/Orientation.h>
 #include <SkyboltSim/Spatial/Position.h>
@@ -67,6 +74,25 @@ static void setGlobalEngineRoot(EngineRoot* root) { gEngineRoot = root;
 
 static std::unique_ptr<EngineRoot> createEngineRootWithDefaults() {
 	return EngineRootFactory::create({});
+}
+
+static std::unique_ptr<EngineRoot> createEngineRoot(bool enableVis = true, bool loadPlugins = true)
+{
+	nlohmann::json settings = readEngineSettings({});
+
+	std::vector<PluginFactory> pluginFactories;
+	
+	if (loadPlugins)
+	{
+		pluginFactories = loadPluginFactories<Plugin, PluginConfig>(getAllPluginFilepathsInDirectories(EngineRootFactory::getDefaultPluginDirs()));
+	}
+
+	EngineRootConfig config;
+	config.engineSettings = settings;
+	config.enableVis = enableVis;
+	auto engineRoot = std::make_unique<EngineRoot>(config);
+	engineRoot->loadPlugins(pluginFactories);
+	return engineRoot;
 }
 
 } // namespace skybolt
@@ -142,15 +168,24 @@ static bool attachCameraToWindowWithEngine(sim::Entity& camera, vis::Window& win
 	return false;
 }
 
-static void stepSim(EngineRoot& engineRoot, double dt)
+static void advanceSimTime(EngineRoot& engineRoot, double dt)
 {
+	// FIXME TODO: we should be starting from current sim time, not starting from zero
 	SimStepper stepper(engineRoot.systemRegistry);
 	stepper.update(dt);
 }
 
+static void advanceWallTime(EngineRoot& engineRoot, double dt)
+{
+	for (const auto& system : *engineRoot.systemRegistry)
+	{
+		system->advanceWallTime(0, dt); // FIXME TODO: we should be tracking current wall time, not starting from zero
+	}
+}
+
 static bool render(EngineRoot& engineRoot, vis::VisRoot& visRoot)
 {
-	stepSim(engineRoot, 0.0); // FIXME: We need to call this to update all the systems prior to rendering, but we don't actually need to 'step'.
+	advanceSimTime(engineRoot, 0.0); // FIXME: We need to call this to update all the systems prior to rendering
 	return visRoot.render();
 }
 
@@ -190,6 +225,84 @@ static void registerComponent(EngineRoot& engineRoot, const py::handle& pyClass)
 	std::string componentClassName = py::str(pyClass.attr("__name__"));
 	mComponentFactoryRegistry->insert(std::make_pair(componentClassName, factory));
 }
+
+static void loadScenarioFromJsonString(EngineRoot& engineRoot, const std::string& jsonString)
+{
+	EntityFactoryFn entityFactoryFn = [entityFactory = engineRoot.entityFactory.get()](const std::string& templateName, const std::string& instanceName) {
+		return entityFactory->createEntity(templateName, instanceName);
+	};
+
+	nlohmann::json j = nlohmann::json::parse(jsonString);
+	ifChildExists(j, "scenario", [&] (const nlohmann::json& child) {
+		readScenario(*engineRoot.typeRegistry, *engineRoot.scenario, entityFactoryFn, child);
+	});
+}
+
+static std::string saveScenarioToJsonString(EngineRoot& engineRoot)
+{
+	nlohmann::json j;
+	j["scenario"] = writeScenario(*engineRoot.typeRegistry, *engineRoot.scenario);
+	return j.dump(4);
+}
+
+static std::optional<LatLonAlt> getPositionLla(const Entity& entity)
+{
+	std::optional<Vector3> position = getPosition(entity);
+	if (!position) { return std::nullopt; }
+
+	return toLatLonAlt(GeocentricPosition(*position)).position;
+}
+
+static void setPositionLla(Entity& entity, const LatLonAlt& lla)
+{
+	Vector3 position = toGeocentric(LatLonAltPosition(lla)).position;
+	setPosition(entity, position);
+}
+
+static std::optional<Vector3> getOrientationRpy(const Entity& entity)
+{
+	std::optional<Vector3> position = getPosition(entity);
+	if (!position) { return std::nullopt; }
+
+	std::optional<Quaternion> orientation = getOrientation(entity);
+	if (!orientation) { return std::nullopt; }
+
+	Quaternion ltpNed = toLtpNed(GeocentricOrientation(*orientation), geocentricToLatLon(*position)).orientation;
+	return math::eulerFromQuat(ltpNed);
+}
+
+static void setOrientationRpy(Entity& entity, const Vector3& rpy)
+{
+	std::optional<Vector3> position = getPosition(entity);
+	if (!position) { return; }
+
+	Quaternion orientation = toGeocentric(LtpNedOrientation(math::quatFromEuler(rpy)), geocentricToLatLon(*position)).orientation;
+	setOrientation(entity, orientation);
+}
+
+static std::optional<Vector3> getVelocityNed(const Entity& entity)
+{
+	std::optional<Vector3> velocity = getVelocity(entity);
+	if (!velocity) { return std::nullopt; }
+
+	std::optional<Vector3> position = getPosition(entity);
+	if (!position) { return std::nullopt; }
+
+	Matrix3 ltpOrientation = geocentricToLtpOrientation(*position);
+
+	return glm::transpose(ltpOrientation) * *velocity;
+}
+
+static void setVelocityNed(Entity& entity, const Vector3& velocity)
+{
+	std::optional<Vector3> position = getPosition(entity);
+	if (!position) { return; }
+
+	Matrix3 ltpOrientation = geocentricToLtpOrientation(*position);
+
+	setVelocity(entity, ltpOrientation * velocity);
+}
+
 
 PYBIND11_MAKE_OPAQUE(std::vector<std::string>);
 
@@ -297,7 +410,9 @@ PYBIND11_MODULE(skybolt, m) {
 
 	py::class_<ScenarioMetadataComponent, std::shared_ptr<ScenarioMetadataComponent>, Component>(m, "ScenarioMetadataComponent")
 		.def_readwrite("serializable", &ScenarioMetadataComponent::serializable)
-		.def_readwrite("deletable", &ScenarioMetadataComponent::deletable)
+		.def_property("deletable", // TODO: deprecate deletable and expose setting the ScenarioMetadataComponent::LifetimePolicy enum value directly
+			[] (const ScenarioMetadataComponent& c) { return c.lifetimePolicy == ScenarioMetadataComponent::LifetimePolicy::User; }, // user is allowed to delete
+			[] (ScenarioMetadataComponent& c, bool value) { return c.lifetimePolicy = value ? ScenarioMetadataComponent::LifetimePolicy::User : ScenarioMetadataComponent::LifetimePolicy::Procedural; })
 		.def_readwrite("directory", &ScenarioMetadataComponent::directory);
 
 	py::class_<TemplateNameComponent, std::shared_ptr<TemplateNameComponent>, Component>(m, "TemplateNameComponent", "A component storing the name of the template which an `Entity` instantiates")
@@ -305,8 +420,8 @@ PYBIND11_MODULE(skybolt, m) {
 
 	py::class_<CameraComponent, std::shared_ptr<CameraComponent>, Component>(m, "CameraComponent")
 		.def_property("state",
-			[](const CameraComponent& c) { return c.getState(); },
-			[](CameraComponent& c, const CameraState& state) { CameraState& s = c.getState(); s = state; },
+			[](const CameraComponent& c) -> const CameraState& { return c.getState(); },
+			[](CameraComponent& c, const CameraState& state) { c.getState() = state; },
 			py::return_value_policy::reference_internal);
 
 	py::class_<CameraControllerSelector, std::shared_ptr<CameraControllerSelector>>(m, "CameraControllerSelector")
@@ -315,6 +430,14 @@ PYBIND11_MODULE(skybolt, m) {
 		.def("setTargetId", &CameraControllerSelector::setTargetId);
 
 	py::class_<CameraControllerComponent, std::shared_ptr<CameraControllerComponent>, Component, CameraControllerSelector>(m, "CameraControllerComponent");
+
+	py::class_<AttacherComponent, std::shared_ptr<AttacherComponent>>(m, "AttacherComponent")
+		.def_readwrite("enabled", &AttacherComponent::enabled)
+		.def_readwrite("parentEntityId", &AttacherComponent::parentEntityId)
+		.def_readwrite("parentEntityAttachmentPoint", &AttacherComponent::parentEntityAttachmentPoint)
+		.def_readwrite("ownEntityAttachmentPoint", &AttacherComponent::ownEntityAttachmentPoint)
+		.def_readwrite("positionOffset", &AttacherComponent::positionOffset)
+		.def_readwrite("orientationOffset", &AttacherComponent::orientationOffset);
 
 	py::class_<EntityTargeter>(m, "EntityTargeter", "Interface for a class which references a target `Entity` by `EntityId`")
 		.def("getTargetId", &EntityTargeter::getTargetId)
@@ -328,14 +451,38 @@ PYBIND11_MODULE(skybolt, m) {
 		.def("getPosition", [](Entity* entity) {
 			return *getPosition(*entity);
 		})
+		.def("getPositionLla", [](Entity* entity) {
+			return *getPositionLla(*entity);
+		})
 		.def("setPosition", [](Entity* entity, const Vector3& position) {
 			setPosition(*entity, position);
+		})
+		.def("setPositionLla", [](Entity* entity, const LatLonAlt& position) {
+			setPositionLla(*entity, position);
 		})
 		.def("getOrientation", [](Entity* entity) {
 			return *getOrientation(*entity);
 		})
+		.def("getOrientationRpy", [](Entity* entity) {
+			return *getOrientationRpy(*entity);
+		})
 		.def("setOrientation", [](Entity* entity, const Quaternion& orientation) {
 			setOrientation(*entity, orientation);
+		})
+		.def("setOrientationRpy", [](Entity* entity, const Vector3& orientation) {
+			setOrientationRpy(*entity, orientation);
+		})
+		.def("getVelocity", [](Entity* entity) {
+			return *getVelocity(*entity);
+		})
+		.def("getVelocityNed", [](Entity* entity) {
+			return *getVelocityNed(*entity);
+		})
+		.def("setVelocity", [](Entity* entity, const Vector3& velocity) {
+			setVelocity(*entity, velocity);
+		})
+		.def("setVelocityNed", [](Entity* entity, const Vector3& velocity) {
+			setVelocityNed(*entity, velocity);
 		})
 		.def("getComponents", &Entity::getComponents)
 		.def("getComponentsOfType", &getComponentsOfTypeName)
@@ -348,7 +495,7 @@ PYBIND11_MODULE(skybolt, m) {
 		.def("addEntity", &World::addEntity)
 		.def("removeEntity", &World::removeEntity)
 		.def("removeAllEntities", &World::removeAllEntities)
-		.def("findObjectByName", &World::findObjectByName);
+		.def("findEntityByName", &World::findObjectByName);
 
 	py::class_<EntityFactory>(m, "EntityFactory", "Class responsible for creating `Entity` instances based on a template name")
 		.def("createEntity", &EntityFactory::createEntity, py::return_value_policy::reference,
@@ -359,11 +506,18 @@ PYBIND11_MODULE(skybolt, m) {
 		.def_property("time", [](Scenario* scenario) { return scenario->timeSource.getTime(); }, [](Scenario* scenario, double time) { return scenario->timeSource.setTime(time); })
 		.def_property_readonly("currentJulianDate", [](Scenario* scenario) {return getCurrentJulianDate(*scenario); });
 
+	py::class_<PyComponentProperty, PyComponentPropertyPtr>(m, "Property")
+		.def_property_readonly("name", &PyComponentProperty::getName)
+		.def_property_readonly("readOnly", &PyComponentProperty::isReadOnly)
+		.def_property("value", [] (PyComponentProperty& p) { return p.getValue(); }, [] (PyComponentProperty& p, const py::handle& value) {p.setValue(value);});
+
 	py::class_<EngineRoot>(m, "EngineRoot")
 		.def_property_readonly("world", [](const EngineRoot& r) {return &r.scenario->world; }, py::return_value_policy::reference_internal)
 		.def_property_readonly("entityFactory", [](const EngineRoot& r) {return r.entityFactory.get(); }, py::return_value_policy::reference_internal)
 		.def_property_readonly("scenario", [](const EngineRoot& r) {return r.scenario.get(); }, py::return_value_policy::reference_internal)
-		.def("locateFile", [](const EngineRoot& r, const std::string& filename) { return value(r.fileLocator(filename)).value_or("").string(); });
+		.def("locateFile", [](const EngineRoot& r, const std::string& filename) { return value(r.fileLocator(filename)).value_or("").string(); })
+		.def("loadScenarioFromJson", loadScenarioFromJsonString)
+		.def("saveScenarioToJson", saveScenarioToJsonString);
 
 	py::class_<vis::Window, std::shared_ptr<vis::Window>>(m, "Window");
 
@@ -386,10 +540,12 @@ PYBIND11_MODULE(skybolt, m) {
 
 	m.def("getGlobalEngineRoot", &getGlobalEngineRoot, "Get global EngineRoot", py::return_value_policy::reference);
 	m.def("setGlobalEngineRoot", &setGlobalEngineRoot, "Set global EngineRoot");
-	m.def("createEngineRootWithDefaults", &createEngineRootWithDefaults, "Create an EngineRoot with default values");
+	m.def("createEngineRootWithDefaults", &createEngineRootWithDefaults, "Create an EngineRoot with default values"); //@deprecated
+	m.def("createEngineRoot", &createEngineRoot, py::arg("enableVis"), py::arg("loadPlugins"), "Create an EngineRoot");
 	m.def("attachCameraToWindowWithEngine", &attachCameraToWindowWithEngine);
 	m.def("registerComponent", &registerComponent);
-	m.def("stepSim", &stepSim);
+	m.def("advanceSimTime", &advanceSimTime);
+	m.def("advanceWallTime", &advanceWallTime);
 	m.def("render", &render, py::arg("engineRoot"), py::arg("window"));
 	m.def("toGeocentricPosition", [](const PositionPtr& position) { return std::make_shared<GeocentricPosition>(toGeocentric(*position)); });
 	m.def("toGeocentricOrientation", [](const OrientationPtr& orientation, const LatLon& latLon) { return std::make_shared<GeocentricOrientation>(toGeocentric(*orientation, latLon)); });
@@ -406,4 +562,6 @@ PYBIND11_MODULE(skybolt, m) {
 	m.def("transformToScreenSpace", &transformToScreenSpace);
 	m.def("setWaveHeight", &setWaveHeight);
 	m.def("calcSmallestAngleFromTo", &math::calcSmallestAngleFromTo<double>);
+	m.def("getProperties", &getComponentProperties);
+	m.def("getProperty", &getComponentProperty);
 }

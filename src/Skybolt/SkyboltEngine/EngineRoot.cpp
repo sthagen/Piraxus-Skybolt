@@ -44,7 +44,7 @@ Expected<file::Path> locateFile(const std::string& filename)
 	return resolvedFilename;
 };
 
-static std::vector<std::string> transparentMaterialNames() { return { "transparentExt", "transparent" }; }
+static std::vector<std::string> transparentMaterialNames() { return { "transparentExt", "transparent" }; } //@deprecated. Set osg::Material diffuse alpha < 1 instead to treat geometry as transparent.
 
 static vis::ModelFactoryPtr createModelFactory(const vis::ShaderPrograms& programs)
 {
@@ -52,6 +52,7 @@ static vis::ModelFactoryPtr createModelFactory(const vis::ShaderPrograms& progra
 
 	vis::ModelFactoryConfig config;
 	config.defaultProgram = programs.getRequiredProgram("model");
+	config.glassProgram = glassProgram;
 	for (const std::string& name : transparentMaterialNames())
 	{
 		config.stateSetModifiers[name] = [=](osg::StateSet& stateSet, const osg::Material& material) {
@@ -247,9 +248,17 @@ void EngineRoot::loadPlugins(const std::vector<PluginFactory>& pluginFactories)
 	// Create plugins and store them in EngineRoot to ensure plugins exist for lifetime of EngineRoot.
 	for (const auto& factory : pluginFactories)
 	{
-		if (PluginPtr plugin = factory(config); plugin)
+		try
 		{
-			mPlugins.push_back(plugin);
+			if (PluginPtr plugin = factory(config); plugin)
+			{
+				assert(plugin);
+				mPlugins.push_back(plugin);
+			}
+		}
+		catch(const std::exception& e)
+		{
+			BOOST_LOG_TRIVIAL(error) << "Error loading plugin: " << e.what();
 		}
 	}
 

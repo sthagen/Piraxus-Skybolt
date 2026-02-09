@@ -23,18 +23,10 @@ else()
 	set (SKYBOLT_PLUGINS_LIBRARY_TYPE SHARED)
 endif()
 
-# Allow user to overwrite install path.
-# Solution from https://stackoverflow.com/questions/39481958/setting-cmake-install-prefix-from-cmakelists-txt-file
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT)
-	if(DEFINED ENV{CMAKE_INSTALL_PREFIX})
-		set(CMAKE_INSTALL_PREFIX $ENV{CMAKE_INSTALL_PREFIX}/Skybolt CACHE PATH "Overriding CMAKE_INSTALL_PREFIX from environment variable" FORCE)
-	endif()
-endif()
-
 #-------------------------------------------------------------
 # Compiler flags
 #-------------------------------------------------------------
-set(CMAKE_CXX_STANDARD 17)
+set(CMAKE_CXX_STANDARD 20)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
 OPTION(DISABLE_OPTIMIZATION_RELWITHDEBINFO "Disable Optimization in RelWithDebInfo")
@@ -76,6 +68,12 @@ if (OSG_STATIC_LIBS)
 endif()
 
 #-------------------------------------------------------------
+# Build options
+#-------------------------------------------------------------
+
+OPTION(BUILD_PYTHON_BINDINGS "Build Python Bindings")
+
+#-------------------------------------------------------------
 # Build tree
 #-------------------------------------------------------------
 include(AddSourceGroup)
@@ -90,7 +88,7 @@ add_subdirectory(src/SkyboltExamples)
 # Installation
 #-------------------------------------------------------------
 # Install conan files (required by 'conan editable' feature. See https://docs.conan.io/en/latest/developing_packages/editable_packages.html)
-if (EXISTS ${CMAKE_SOURCE_DIR}/conanfile.py) # File might not exist if during conan build. See https://github.com/conan-io/conan/issues/5415.
+if (EXISTS ${CMAKE_SOURCE_DIR}/conanfile.py) # File might not exist during conan build. See https://github.com/conan-io/conan/issues/5415.
 	install(FILES ${CMAKE_SOURCE_DIR}/conanfile.py DESTINATION .)
 endif()
 install(DIRECTORY ${CMAKE_SOURCE_DIR}/Conan	DESTINATION .)

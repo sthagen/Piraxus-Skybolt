@@ -7,14 +7,13 @@
 #pragma once
 
 #include <SkyboltCommon/Math/MathUtility.h>
+#include "WaveSpectrumWindow.h"
 
-#include <boost/random/normal_distribution.hpp>
-#include <boost/random/mersenne_twister.hpp>
-#include <boost/random/variate_generator.hpp>
 #include <complex>
 #include <vector>
 
 #include <xsimd/xsimd.hpp>
+#include <span>
 
 namespace skybolt {
 namespace vis {
@@ -25,8 +24,9 @@ struct FftOceanGeneratorConfig
 	int textureSizePixels;
 	float textureWorldSize;
 	glm::vec2 windVelocity;
-	glm::vec2 normalizedFrequencyRange; //!< (min, max) in range [0, 1]
 	float gravity;
+	WaveSpectrumWindow waveSpectrumWindow;
+	bool useMultipleCores = false;
 };
 
 template <typename T>
@@ -66,18 +66,22 @@ public:
 	}
 
 	//! Generates a vector displacement image of the wave field at given time
-	void calculate(float time, std::vector<glm::vec3>& result);
+	//! @param result is a pointer to a buffer of size mTextureSizePixels * mTextureSizePixels in which to store the calculated output
+	void calculate(float time, const std::span<glm::vec3>& result);
 
-	void setWindSpeed(float windSpeed);
+	void setWindVelocity(const glm::vec2& windVelocity);
+
+	glm::ivec2 getTextureSizePixels() const { return glm::ivec2(mTextureSizePixels, mTextureSizePixels); }
+	glm::dvec2 getTextureWorldSize() const { return glm::dvec2(mTextureWorldSize, mTextureWorldSize); }
 
 	typedef std::complex<float> complex_type;
+	const std::vector<complex_type>& getHt0Image() const { return mHt0; } //!< Image has dimensions of (mTextureSizePixels, mTextureSizePixels)
 
 private:
 	Simd4 calcDispersion(Simd4 kx, Simd4 kz) const;
 	float calcPhillips(int n, int m) const;
 	float calcBruenton(int n, int m) const;
 	void calcHt0();
-	complex_type generateRandomComplexGaussian();
 
 	using aligned_complex_type = complex_type; //!< Must be alligned for simd/avx. Allocate with mufft_alloc to gaurantee alignment
 
@@ -89,13 +93,13 @@ private:
 	static aligned_complex_type_ptr allocateAlignedComplexType(size_t elementCount);
 
 private:
-	typedef boost::variate_generator<boost::mt19937, boost::random::normal_distribution<float> > RandomGenerator;
-	RandomGenerator mRandom;
-	glm::vec2 mNormalizedFrequencyRange; //!< (min, max) in range [0, 1]
 	const int mTextureSizePixels;
 	const float mTextureWorldSize;
 	const float mOneOnTextureWorldSize;
 	const float mGravity;
+	const WaveSpectrumWindow mWaveSpectrumWindow;
+	const bool mUseMultipleCores;
+
 	glm::vec2 mWindVelocity;
 	std::vector<complex_type> mHt0;
 	std::vector<complex_type> mHt0Conj;

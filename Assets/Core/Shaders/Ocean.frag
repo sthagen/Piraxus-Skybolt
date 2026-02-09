@@ -5,8 +5,8 @@
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
 #version 440 core
-#pragma import_defines ( DISTANCE_CULL )
-#pragma import_defines ( ENABLE_DEPTH_OFFSET )
+#pragma import_defines(DISTANCE_CULL)
+#pragma import_defines(ENABLE_DEPTH_OFFSET)
 
 #extension GL_EXT_gpu_shader4 : enable // Required by HARDWARE_ANISTROPIC_FILTERING
 #define HARDWARE_ANISTROPIC_FILTERING
@@ -14,6 +14,8 @@
 #include "AtmosphericScatteringWithClouds.h"
 #include "DepthPrecision.h"
 #include "Ocean.h"
+#include "Rerange.h"
+#include "Wake.h"
 #include "Brdfs/BlinnPhong.h"
 #include "Brdfs/Lambert.h"
 #include "ThirdParty/BruentonOcean.h"
@@ -26,12 +28,12 @@ in AtmosphericScattering scattering;
 
 out vec4 color;
 
-uniform sampler2D normalSamplers[NUM_OCEAN_CASCADES];
-uniform sampler2D foamMaskSamplers[NUM_OCEAN_CASCADES];
+uniform sampler2D normalSamplers[OCEAN_CASCADE_COUNT];
+uniform sampler2D foamMaskSamplers[OCEAN_CASCADE_COUNT];
 uniform sampler2D foamSampler;
 
 uniform mat4 reflectionViewProjectionMatrix;
-uniform vec2 heightMapTexCoordScales[NUM_OCEAN_CASCADES];
+uniform vec2 heightMapTexCoordScales[OCEAN_CASCADE_COUNT];
 uniform vec3 lightDirection; // direction to light
 uniform float waterHeight;
 uniform vec3 ambientLightColor;
@@ -39,9 +41,6 @@ uniform vec3 ambientLightColor;
 #ifdef ENABLE_DEPTH_OFFSET
 	uniform float depthOffset;
 #endif
-
-uniform samplerBuffer wakeHashMapTexture;
-uniform samplerBuffer wakeParamsTexture;
 
 const float infinity = 1e10;
 const float normalMipmapBias = 1.0; // TODO: why is this needed?
@@ -117,79 +116,6 @@ float distanceSquared(vec2 a, vec2 b)
 	return dot(c,c);
 }
 
-float calcSternWakeMask(vec3 wakeStart, vec3 wakeEnd)
-{
-	vec2 positionWS2d = positionWS.xy;
-	float t = nearestPointOnLine(wakeStart.xy, wakeEnd.xy, positionWS2d);
-	
-	vec3 wakeStartToEnd = wakeEnd - wakeStart;
-	vec3 pointOnWake = wakeStart + wakeStartToEnd * t;
-
-	vec2 dir = normalize(wakeStartToEnd.xy);
-	vec2 lateral = vec2(dir.y, -dir.x);
-	pointOnWake.xy += lateral * sin(t*100)*0.5;
-	
-	float s = distance(pointOnWake.xy, positionWS2d);
-	
-	float sternWake = clamp(0.5 * (pointOnWake.z - s), 0.0, 1.0) * (1.0 - t);
-	
-	// Add bands of lesser amount of foam
-	sternWake *= 0.3 + 0.7 * clamp(0.2 * (abs(s-pointOnWake.z*0.4))-0.1, 0.0, 1.0);
-	
-	return sternWake;
-}
-
-float calcRotorWashMask(vec3 wakeStart, vec3 wakeEnd)
-{
-	vec2 wakeDir = normalize(wakeEnd.xy - wakeStart.xy);
-	wakeStart.xy += wakeDir * 10;
-	vec2 positionWS2d = positionWS.xy;
-	float elongate = dot(wakeDir, normalize(positionWS2d.xy - wakeStart.xy)) * 0.5 + 0.5;
-	float radius = length(wakeStart.xy - positionWS2d);
-	float foamRadius = mix(15, 25, elongate);
-	float doughnut = 0.12 * (1.0 - 0.5 * elongate) * max(0.0, 1.0 - 0.05 * abs(radius - foamRadius)) * mix(0.2, 1.0, 0.5 * (1.0 + sin(radius)));
-	return doughnut;
-}
-
-const int hashCellsX = 128;
-vec2 cellWorldSize = vec2(100);
-
-int modPositive(int a, int b)
-{
-	return (a%b+b)%b;
-}
-
-int calcHash(vec2 position)
-{
-	vec2 cellF = position / cellWorldSize;
-	ivec2 cell = ivec2(floor(cellF));
-	return modPositive(cell.x, hashCellsX) + modPositive(cell.y, hashCellsX) * hashCellsX;
-}
-
-float calcWakeMask()
-{
-	int hashIndex = calcHash(positionWS.xy) * 2;
-	int paramsBeginIndex = int(texelFetch(wakeHashMapTexture, hashIndex).x);
-	int paramsEndIndex = int(texelFetch(wakeHashMapTexture, hashIndex + 1).x); // last index + 1
-
-	float mask = 0;
-	for (int i = paramsBeginIndex; i < paramsEndIndex; i += 2)
-	{
-		vec3 wakeStart = texelFetch(wakeParamsTexture, i).xyz;
-		vec3 wakeEnd = texelFetch(wakeParamsTexture, i+1).xyz;
-		if (wakeStart.z < 0.0)
-		{
-			mask = max(mask, calcRotorWashMask(wakeStart, wakeEnd));
-		}
-		else
-		{
-			mask = max(mask, calcSternWakeMask(wakeStart, wakeEnd));
-		}
-	}
-
-	return mask;
-}
-
 float calcUvCyclesPerPixel(vec2 uv)
 {
 	vec2 dxUv = dFdx(uv);
@@ -220,25 +146,16 @@ void main(void)
 #endif
 	vec2 texCoord = wrappedNoiseCoord * heightMapTexCoordScales[0];
 	vec3 normalSample = texture(normalSamplers[0], texCoord, normalMipmapBias).rgb;
+	vec3 normal = normalize(normalSample * vec3(2) - vec3(1));
 	float foamMask = texture(foamMaskSamplers[0], texCoord).r;
-
-	vec3 normal = normalSample * vec3(2) - vec3(1);
-	float normalLength = length(normal);
 	
-	if (NUM_OCEAN_CASCADES == 1)
+	for (int i = 1; i < OCEAN_CASCADE_COUNT; ++i)
 	{
-		normal = normal / normalLength;
-	}
-	else
-	{
-		for (int i = 1; i < NUM_OCEAN_CASCADES; ++i)
-		{
-			vec2 texCoord = wrappedNoiseCoord * heightMapTexCoordScales[i];
-			
-			vec3 normalSample2 = texture(normalSamplers[i], texCoord, normalMipmapBias).rgb;
-			normal = blendNormals(normalSample, normalSample2);
-			foamMask = max(foamMask, texture(foamMaskSamplers[i], texCoord, normalMipmapBias).r);
-		}
+		vec2 texCoord = wrappedNoiseCoord * heightMapTexCoordScales[i];
+		vec3 prevNormalSample = normal * 0.5 + vec3(0.5);
+		normalSample = texture(normalSamplers[i], texCoord, normalMipmapBias).rgb;		
+		normal = blendNormals(prevNormalSample, normalSample);
+		foamMask = max(foamMask, texture(foamMaskSamplers[i], texCoord, normalMipmapBias).r);
 	}
 
 	normal.z = -normal.z;
@@ -289,12 +206,16 @@ void main(void)
 	float foamEnergyNormalizationTerm = 1.5 * M_PI; // This is a guess. Presumably the real value is somewhere between pi and 2 * pi.
 	vec3 foamReflectance = (scattering.sunIrradiance + scattering.skyIrradiance) / foamEnergyNormalizationTerm;
 
-	foamMask = max(foamMask, calcWakeMask());
+	float bowWakeStrength = 0.5;
+	float sternWakeStrength = 0.9;
+	foamMask = max(foamMask, calcWakeMask(positionWS.xy, bowWakeStrength, sternWakeStrength).x);
 
 	vec3 foamColor = vec3(1.0);
-	float foamTexture = texture(foamSampler, wrappedNoiseCoord.xy*1000, normalMipmapBias).r;
-	float foamFraction = pow(foamTexture, 0.5 / (foamMask + 0.0001)) * smoothstep(0.0, 0.1, foamMask);
-	
+	float foamTexture = texture(foamSampler, wrappedNoiseCoord.xy*400, normalMipmapBias).r;
+	float foamFraction = pow(foamTexture, 2 / (foamMask + 0.0001)) * smoothstep(0.0, 0.1, foamMask);
+	foamFraction += foamTexture * foamMask * 0.15; // simulate bubbles under surface
+	foamFraction = clamp(foamFraction, 0, 1);
+
 	color.rgb = mix(color.rgb, foamColor * foamReflectance, foamFraction);
 	
 	color.rgb = color.rgb * scattering.transmittance + scattering.skyRadianceToPoint;

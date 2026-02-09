@@ -6,16 +6,24 @@
 
 #pragma once
 
-#include "SkyboltReflection/Reflection.h"
+#include "SkyboltReflect/Reflection.h"
 
 #include <nlohmann/json.hpp>
 
 namespace skybolt::sim {
 
+//! Reads object's properties from json. If object derives from ExplicitSerialization, the
+//! ExplicitSerialization function will be used, otherwise fall back to readReflectedObjectProperties().
 void readReflectedObject(refl::TypeRegistry& registry, refl::Instance& object, const nlohmann::json& json);
 
+void readReflectedObjectProperties(refl::TypeRegistry& registry, refl::Instance& object, const nlohmann::json& json);
+
+//! Writes object's properties to json. If object derives from ExplicitSerialization, the
+//! ExplicitSerialization function will be used, otherwise fall back to writeReflectedObjectProperties().
 nlohmann::json writeReflectedObject(refl::TypeRegistry& registry, const refl::Instance& object);
 
+//! Writes object's properties to json
+nlohmann::json writeReflectedObjectProperties(refl::TypeRegistry& registry, const refl::Instance& object);
 
 //! If an object implements this class, the toJson/fromJson methods will be used to serialize the object,
 //! instead of relying on reflection for automatic serialization. This is useful for implementing complex

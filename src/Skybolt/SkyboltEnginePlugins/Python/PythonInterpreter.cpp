@@ -16,11 +16,15 @@ namespace py = pybind11;
 
 namespace skybolt {
 
-PythonInterpreter::PythonInterpreter(EngineRoot* engineRoot) :
-	mPyInterpreter(std::make_unique<py::scoped_interpreter>())
+PythonInterpreter::PythonInterpreter(EngineRoot* engineRoot)
 {
 	try
 	{
+		if (!Py_IsInitialized()) // If interpreter not already managed externally
+		{
+			mPyInterpreter = std::make_unique<py::scoped_interpreter>();
+		}
+
 		py::list sysPath = py::module::import("sys").attr("path").cast<py::list>();
 
 		auto scriptFolders = getPathsInAssetPackages(engineRoot->getAssetPackagePaths(), "Scripts");
@@ -29,9 +33,9 @@ PythonInterpreter::PythonInterpreter(EngineRoot* engineRoot) :
 			sysPath.append(scriptFolder.string());
 		}
 
-		if (const char* skyboltLibPath = std::getenv("SKYBOLT_LIB_PATH"); skyboltLibPath)
+		if (const char* pythonPath = std::getenv("SKYBOLT_PYTHON_PATH"); pythonPath)
 		{
-			for (const std::string& path : file::splitByPathListSeparator(skyboltLibPath))
+			for (const std::string& path : file::splitByPathListSeparator(pythonPath))
 			{
 				sysPath.append(path);
 			}

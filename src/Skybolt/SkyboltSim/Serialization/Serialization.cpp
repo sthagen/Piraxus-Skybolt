@@ -19,7 +19,7 @@ template <typename T>
 ToReflVariantTranslator createToReflVariantTranslator()
 {
 	return [] (refl::TypeRegistry& registry, const nlohmann::json& json) {
-		return refl::createOwningInstance(&registry, json.get<T>());
+		return refl::makeValueInstance(registry, json.get<T>());
 		};
 }
 
@@ -27,7 +27,7 @@ template <typename T>
 ToReflVariantTranslator createOptionalToReflVariantTranslator()
 {
 	return [] (refl::TypeRegistry& registry, const nlohmann::json& json) {
-		return refl::createOwningInstance(&registry, std::optional<T>(json.get<T>()));
+		return refl::makeValueInstance(registry, std::optional<T>(json.get<T>()));
 		};
 }
 
@@ -53,10 +53,10 @@ static std::optional<refl::Instance> jsonToReflVariant(refl::TypeRegistry& regis
 		{ registry.getOrCreateType<std::optional<double>>().get(), createOptionalToReflVariantTranslator<double>() },
 		{ registry.getOrCreateType<std::optional<std::string>>().get(), createToReflVariantTranslator<std::string>() },
 
-		{ registry.getOrCreateType<sim::Vector3>().get(), [] (refl::TypeRegistry& registry, const nlohmann::json& json) { return refl::createOwningInstance(&registry, readVector3(json)); }},
-		{ registry.getOrCreateType<sim::Quaternion>().get(), [] (refl::TypeRegistry& registry, const nlohmann::json& json) { return refl::createOwningInstance(&registry, readQuaternion(json)); }},
-		{ registry.getOrCreateType<sim::LatLon>().get(), [] (refl::TypeRegistry& registry, const nlohmann::json& json) { return refl::createOwningInstance(&registry, readLatLon(json)); }},
-		{ registry.getOrCreateType<sim::LatLonAlt>().get(), [] (refl::TypeRegistry& registry, const nlohmann::json& json) { return refl::createOwningInstance(&registry, readLatLonAlt(json)); }}
+		{ registry.getOrCreateType<sim::Vector3>().get(), [] (refl::TypeRegistry& registry, const nlohmann::json& json) { return refl::makeValueInstance(registry, readVector3(json)); }},
+		{ registry.getOrCreateType<sim::Quaternion>().get(), [] (refl::TypeRegistry& registry, const nlohmann::json& json) { return refl::makeValueInstance(registry, readQuaternion(json)); }},
+		{ registry.getOrCreateType<sim::LatLon>().get(), [] (refl::TypeRegistry& registry, const nlohmann::json& json) { return refl::makeValueInstance(registry, readLatLon(json)); }},
+		{ registry.getOrCreateType<sim::LatLonAlt>().get(), [] (refl::TypeRegistry& registry, const nlohmann::json& json) { return refl::makeValueInstance(registry, readLatLonAlt(json)); }}
 	};
 
 	if (const auto& i = translators.find(&type); i != translators.end())
@@ -83,27 +83,26 @@ void readReflectedObject(refl::TypeRegistry& registry, refl::Instance& object, c
 	refl::TypePtr type = object.getType();
 	if (type->isDerivedFrom<ExplicitSerialization>())
 	{
-		if (ExplicitSerialization* serialization = object.getObject<ExplicitSerialization>(); serialization)
-		{
-			serialization->fromJson(registry, json);
-		}
-		else
-		{
-			assert(!"Should not get here");
-		}
+		ExplicitSerialization& serialization = object.cast<ExplicitSerialization>();
+		serialization.fromJson(registry, json);
 	}
 	else // use reflection based serialization
 	{
-		for (const auto& [name, property] : getProperties(object))
+		readReflectedObjectProperties(registry, object, json);
+	}
+}
+
+void readReflectedObjectProperties(refl::TypeRegistry& registry, refl::Instance& object, const nlohmann::json& json)
+{
+	for (const auto& [name, property] : getProperties(object))
+	{
+		if (isSerializable(*property))
 		{
-			if (isSerializable(*property))
-			{
-				ifChildExists(json, property->getName(), [&] (const nlohmann::json& propertyJson) {
-					refl::Instance value = property->getValue(object);
-					jsonToExistingReflVariant(registry, value, propertyJson);
-					property->setValue(object, value);
+			ifChildExists(json, property->getName(), [&](const nlohmann::json& propertyJson) {
+				refl::Instance value = property->getValue(object);
+				jsonToExistingReflVariant(registry, value, propertyJson);
+				property->setValue(object, value);
 				});
-			}
 		}
 	}
 }
@@ -114,7 +113,7 @@ template <typename T>
 ToJsonTranslator createToJsonTranslator()
 {
 	return [] (const refl::Instance& var) {
-		return nlohmann::json(*var.getObject<T>());
+		return nlohmann::json(var.cast<T>());
 	};
 }
 
@@ -122,7 +121,7 @@ template <typename T>
 ToJsonTranslator createOptionalToJsonTranslator()
 {
 	return [] (const refl::Instance& var) {
-		auto value = *var.getObject<std::optional<T>>();
+		auto value = var.cast<std::optional<T>>();
 		return value ? nlohmann::json(*value) : nlohmann::json();
 	};
 }
@@ -144,10 +143,10 @@ static nlohmann::json toJson(refl::TypeRegistry& registry, const refl::Type& typ
 		{ registry.getOrCreateType<std::optional<double>>().get(), createOptionalToJsonTranslator<double>() },
 		{ registry.getOrCreateType<std::optional<std::string>>().get(), createOptionalToJsonTranslator<std::string>() },
 
-		{ registry.getOrCreateType<sim::Vector3>().get(), [] (const refl::Instance& var) {	return writeJson(*var.getObject<sim::Vector3>()); }},
-		{ registry.getOrCreateType<sim::Quaternion>().get(), [] (const refl::Instance& var) { return writeJson(*var.getObject<sim::Quaternion>()); }},
-		{ registry.getOrCreateType<sim::LatLon>().get(), [] (const refl::Instance& var) { return writeJson(*var.getObject<sim::LatLon>()); }},
-		{ registry.getOrCreateType<sim::LatLonAlt>().get(), [] (const refl::Instance& var) { return writeJson(*var.getObject<sim::LatLonAlt>()); }}
+		{ registry.getOrCreateType<sim::Vector3>().get(), [] (const refl::Instance& var) {	return writeJson(var.cast<sim::Vector3>()); }},
+		{ registry.getOrCreateType<sim::Quaternion>().get(), [] (const refl::Instance& var) { return writeJson(var.cast<sim::Quaternion>()); }},
+		{ registry.getOrCreateType<sim::LatLon>().get(), [] (const refl::Instance& var) { return writeJson(var.cast<sim::LatLon>()); }},
+		{ registry.getOrCreateType<sim::LatLonAlt>().get(), [] (const refl::Instance& var) { return writeJson(var.cast<sim::LatLonAlt>()); }}
 	};
 
 	if (const auto& i = translators.find(&type); i != translators.end())
@@ -170,28 +169,31 @@ nlohmann::json writeReflectedObject(refl::TypeRegistry& registry, const refl::In
 
 	if (type->isDerivedFrom<ExplicitSerialization>())
 	{
-		if (const ExplicitSerialization* serialization = object.getObject<ExplicitSerialization>(); serialization)
-		{
-			json = serialization->toJson(registry);
-		}
-		else
-		{
-			assert(!"Should not get here");
-		}
+		const ExplicitSerialization& serialization = object.cast<ExplicitSerialization>();
+		json = serialization.toJson(registry);
 	}
 	else // use reflection based serialization
 	{
-		for (const auto& [name, property] : getProperties(object))
+		json = writeReflectedObjectProperties(registry, object);
+	}
+
+	return json;
+}
+
+nlohmann::json writeReflectedObjectProperties(refl::TypeRegistry& registry, const refl::Instance& object)
+{
+	nlohmann::json json;
+
+	for (const auto& [name, property] : getProperties(object))
+	{
+		if (isSerializable(*property))
 		{
-			if (isSerializable(*property))
+			auto type = property->getType();
+			refl::Instance var = property->getValue(object);
+			nlohmann::json valueJson = toJson(registry, *property->getType(), var);
+			if (!valueJson.is_null())
 			{
-				auto type = property->getType();
-				refl::Instance var = property->getValue(object);
-				nlohmann::json valueJson = toJson(registry, *property->getType(), var);
-				if (!valueJson.is_null())
-				{
-					json[property->getName()] = valueJson;
-				}
+				json[property->getName()] = valueJson;
 			}
 		}
 	}

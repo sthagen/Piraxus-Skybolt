@@ -4,17 +4,12 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-/* Copyright 2012-2019 Matthew Paul Reid
-*
-* This Source Code Form is subject to the terms of the Mozilla Public
-* License, v. 2.0. If a copy of the MPL was not distributed with this
-* file, You can obtain one at https://mozilla.org/MPL/2.0/. */
-
 #pragma once
 
 #include "SimMath.h"
 #include "SkyboltSim/Spatial/LatLon.h"
 #include "SkyboltSim/Spatial/LatLonAlt.h"
+#include <SkyboltCommon/Math/Box3.h>
 #include <SkyboltCommon/Math/MathUtility.h>
 #include <nlohmann/json.hpp>
 
@@ -83,6 +78,16 @@ inline LatLonAlt readLatLonAlt(const nlohmann::json& j)
 inline nlohmann::json writeJson(const LatLonAlt& v)
 {
 	return {v.lat * skybolt::math::radToDegD(), v.lon * skybolt::math::radToDegD(), v.alt};
+}
+
+inline Box3d readBox3d(const nlohmann::json& j)
+{
+	return Box3d(sim::readVector3(j[0]), sim::readVector3(j[1]));
+}
+
+inline nlohmann::json writeJson(const Box3d& v)
+{
+	return {sim::writeJson(v.minimum), sim::writeJson(v.maximum)};
 }
 
 inline void writeIfNotEmpty(nlohmann::json& object, const std::string& key, const nlohmann::json& v)

@@ -100,11 +100,11 @@ static sim::ComponentPtr loadMainRotor(Entity* entity, const ComponentFactoryCon
 	int bladeCount = readOptionalOrDefault(json, "bladeCount", 4);
 
 	// TODO: read from json
-	params->pitchResponseRate = 3;
-	params->minPitch = 0.02;
-	params->pitchRange = 0.12;
-	params->maxTppPitch = 0.1;
-	params->maxTppRoll = 0.05;
+	params->pitchResponseRate = readOptionalOrDefault(json, "pitchResponseRate", 3);
+	params->minPitch = readOptionalOrDefault(json, "minPitch", 1.15)  * skybolt::math::degToRadF();
+	params->pitchRange = readOptionalOrDefault(json, "pitchRange", 6.87)  * skybolt::math::degToRadF();
+	params->maxTppPitch = readOptionalOrDefault(json, "maxTppPitch", 6)  * skybolt::math::degToRadF();
+	params->maxTppRoll = readOptionalOrDefault(json, "maxTppRoll", 3)  * skybolt::math::degToRadF();
 	params->tppPitchOffset = readOptionalOrDefault(json, "tppPitchOffset", -3.f)  * skybolt::math::degToRadF();
 	params->liftConst = 0.5f * 5.9f * surfaceAreaPerBlade * bladeCount; // 0.5 * liftSlope[1/rad] * bladeSurfaceArea * bladeCount
 	params->diskRadius = readOptionalOrDefault(json, "diskRadius", 7.3f);
@@ -118,12 +118,9 @@ static sim::ComponentPtr loadMainRotor(Entity* entity, const ComponentFactoryCon
 	config.motion = entity->getFirstComponentRequired<Motion>().get();
 	config.body = entity->getFirstComponentRequired<DynamicBodyComponent>().get();
 	config.positionRelBody = readVector3(json.at("positionRelBody"));
-	config.orientationRelBody = readQuaternion(json.at("orientationRelBody"));
+	config.orientationRelBody = readOptionalQuaternion(json, "orientationRelBody");
 	config.cyclicInput = inputsComponent->createOrGet("stick", glm::vec2(0), posNegUnitRange<glm::vec2>());
 	config.collectiveInput = inputsComponent->createOrGet("collective", 0.0f, unitRange<float>());
-
-	Vector3 positionRelBody = readVector3(json.at("positionRelBody"));
-	Quaternion orientationRelBody = readOptionalQuaternion(json, "orientationRelBody");
 
 	auto component = std::make_shared<MainRotorComponent>(config);
 	component->setNormalizedRpm(1.0f);
@@ -133,11 +130,11 @@ static sim::ComponentPtr loadMainRotor(Entity* entity, const ComponentFactoryCon
 static sim::ComponentPtr loadTailRotor(Entity* entity, const ComponentFactoryContext& context, const nlohmann::json& json)
 {
 	PropellerParams params;
-	params.minPitch = -0.1;
-	params.pitchRange = 0.2;
-	params.pitchResponseRate = 10;
+	params.minPitch = readOptionalOrDefault(json, "minPitch", -5.7)  * skybolt::math::degToRadF();
+	params.pitchRange = readOptionalOrDefault(json, "pitchRange", 11)  * skybolt::math::degToRadF();
+	params.pitchResponseRate = readOptionalOrDefault(json, "pitchResponseRate", 10);
 	params.rpmMultiplier = json.at("rpmMultiplier").get<double>();
- 	params.thrustPerRpmPerPitch = 10;
+ 	params.thrustPerRpmPerPitch = readOptionalOrDefault(json, "thrustPerRpmPerPitch", 10.0);
 
 	PropellerComponentConfig config;
 	config.params = params;
@@ -185,9 +182,13 @@ static sim::ComponentPtr loadShipWake(Entity* entity, const ComponentFactoryCont
 	std::string type = json.at("type");
 	if (type == "shipWake")
 	{
+		float startAheadDistance = readOptionalOrDefault(json, "startAheadDistance", 0); //@ deprecated
+
 		component->type = ShipWakeComponent::Type::SHIP_WAKE;
-		component->startRadius = readOptionalOrDefault(json, "startRadius", 8.f);
-		component->endRadius = readOptionalOrDefault(json, "endRadius", 40.f);
+		component->bowWakeForwardOffset = readOptionalOrDefault(json, "bowWakeForwardOffset", startAheadDistance);
+		component->sternWakeForwardOffset = readOptionalOrDefault(json, "sternWakeForwardOffset", 0);
+		component->startWidth = readOptionalOrDefault(json, "startWidth", 16.f);
+		component->spreadAngularWidth = readOptionalOrDefault(json, "spreadAngularWidth", 5 * math::degToRadD());
 		component->length = readOptionalOrDefault(json, "length", 700.f);
 	}
 	else if (type == "rotorWash")
@@ -258,7 +259,7 @@ static sim::ComponentPtr loadCameraController(Entity* entity, const ComponentFac
 
 	{
 		FreeCameraController::Params params;
-		params.fovY = 0.5;
+		params.baseFovY = 0.5;
 		CameraControllerPtr controller(new FreeCameraController(entity, params));
 		controllers["Free"] = controller;
 	}

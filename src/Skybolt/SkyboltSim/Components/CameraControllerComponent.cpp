@@ -4,12 +4,6 @@
  * License, v. 2.0. If a copy of the MPL was not distributed with this
  * file, You can obtain one at https://mozilla.org/MPL/2.0/. */
 
-/* Copyright 2012-2019 Matthew Paul Reid
-*
-* This Source Code Form is subject to the terms of the Mozilla Public
-* License, v. 2.0. If a copy of the MPL was not distributed with this
-* file, You can obtain one at https://mozilla.org/MPL/2.0/. */
-
 #include "CameraControllerComponent.h"
 #include "SkyboltSim/CameraController/CameraController.h"
 #include "SkyboltSim/CameraController/CameraControllerSelector.h"
@@ -21,14 +15,12 @@
 namespace skybolt {
 namespace sim {
 
-SKYBOLT_REFLECT_BEGIN(CameraControllerComponent)
-{
+SKYBOLT_REFLECT(CameraControllerComponent) {
 	registry.type<CameraControllerComponent>("CameraControllerComponent")
 		.superType<CameraControllerSelector>()
 		.superType<Component>()
 		.superType<ExplicitSerialization>();
 }
-SKYBOLT_REFLECT_END
 
 CameraControllerComponent::CameraControllerComponent(const ControllersMap& controllers) :
 	CameraControllerSelector(controllers)
@@ -71,7 +63,7 @@ nlohmann::json CameraControllerComponent::toJson(refl::TypeRegistry& typeRegistr
 	nlohmann::json controllersJson;
 	for (const auto& [name, controller] : getControllers())
 	{
-		controllersJson[name] = writeReflectedObject(typeRegistry, refl::createNonOwningInstance(&typeRegistry, controller.get()));
+		controllersJson[name] = writeReflectedObject(typeRegistry, refl::makeRefInstance(typeRegistry, controller.get()));
 	}
 	json["controllers"] = controllersJson;
 	return json;
@@ -85,7 +77,7 @@ void CameraControllerComponent::fromJson(refl::TypeRegistry& typeRegistry, const
 		for (const auto& i : getControllers())
 		{
 			ifChildExists(controllersJson, i.first, [&, controller = i.second] (const nlohmann::json& controllerJson) {
-				refl::Instance instance = refl::createNonOwningInstance(&typeRegistry, controller.get());
+				refl::Instance instance = refl::makeRefInstance(typeRegistry, controller.get());
 				readReflectedObject(typeRegistry, instance, controllerJson);
 			});
 		}

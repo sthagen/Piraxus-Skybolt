@@ -2,15 +2,20 @@
 
 ## Obtaining Skybolt
 
-Skybolt can be obtained using one of the following methods:
+Skybolt can be obtained by either of these methods:
 
 * [Download a pre-built version](https://github.com/prograda/skybolt/releases) on supported operating systems
 * [Build from source](building_from_source.md)
 
-## Running the GUI Application
-The main Skybolt GUI application can be started by running the `SkyboltQtApp` executable from the `bin` folder.
+## Scenario Viewer App
+Skybolt comes with a Qt-based 3D scenario viewer application. Example scenarios that demonstrate use cases of the application can be found in `/Scenarios`.
 
-To explore example scenarios, navigate to the `/Scenarios` folder, where you will find pre-configured scenarios that demonstrate use cases of the application.
+## Creating Applications with Skybolt
+The `src/SkyboltExamples` directory contains example applications demonstrating how to build your own projects using Skybolt libraries.
+
+## Using Python API
+Refer to `src/SkyboltExamples/MinimalPython/MinimalPython.py` for example usage of the python API.
+Refer to [Python API documentation](python_api/index.md) for complete reference.
 
 ## Writing Plugins
 Skybolt supports Python and C++ plugins as follows:
@@ -26,6 +31,3 @@ At runtime, Skybolt searches for python plugin modules inside asset packages und
 Skybolt allows develpers to add new engine functionality by writing C++ plugins. Please refer to `src/Skybolt/SkyboltEnginePlugins/` for examples.
 
 At runtime, Skybolt searches for plugins under the `bin/plugins` folder.
-
-## Using Python API without the GUI
-Skybolt has a python API which allows the engine to be used outside the `SkyboltQtApp` application. Refer to `src/SkyboltExamples/MinimalPython/MinimalPython.py` as an example. See also [Python API documentation](python_api/index.md).
